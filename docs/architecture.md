@@ -1,0 +1,96 @@
+# 架构说明
+
+## 分层
+
+```
+CLI (agent_shield/cli.py)
+  └─ attacks/           攻击模块（插件化）
+       └─ targets/      Target 适配层 —— 攻击框架与任意智能体的统一接口
+            └─ runtime/ 智能体运行时（工具调用循环）
+                 ├─ llm/     LLM 客户端（Mock / OpenAI 兼容）
+                 ├─ tools/   工具注册表与内置工具
+                 └─ defenses/ 防护层 GuardRail（策略检查 + 输出清洗）
+```
+
+## 关键抽象
+
+### AgentTarget（targets/base.py）
+
+攻击框架与"被测对象"之间的唯一接口：
+
+```python
+class AgentTarget(ABC):
+    async def run(self, task: str) -> AgentTrace   # 执行任务，返回完整轨迹
+    def inject_tool_payload(self, tool, payload)    # 模拟攻击者控制的工具内容
+```
+
+好处：未来接入 HTTP Agent、LangChain Agent、MCP Server 只需新增一个 Target 实现，
+攻击模块完全不需要改动。
+
+### AgentRuntime（runtime/agent.py）
+
+通用的工具调用循环，是**防护层的注入点**：
+
+```
+LLM 决定下一步
+  ├─ 无工具调用 → 最终回答，结束
+  └─ 有工具调用 → 对每个调用:
+       1. guardrails.check_tool_call(call)      # 策略引擎：拦截则记录 BlockedCall
+       2. tools.execute(call)                    # 执行工具
+       3. guardrails.sanitize_tool_output(...)   # 注入检测器：清洗输出
+       4. 结果回填对话，继续下一轮
+```
+
+每一轮都落一条 TraceStep（消息、工具调用、工具输出、拦截记录），
+这是攻击判定、取证与审计的数据基础。
+
+### GuardRail（defenses/base.py）
+
+```python
+class GuardRail(ABC):
+    def check_tool_call(self, call) -> ToolCallDecision   # allow / deny
+    def sanitize_tool_output(self, call, output) -> str    # 清洗
+```
+
+新增防御手段 = 实现 GuardRail 并加入列表，运行时零改动。
+
+### AttackModule（attacks/base.py）
+
+```python
+class AttackModule(ABC):
+    name / description / atlas_id / owasp_asi
+    async def run(self, target, config) -> AttackResult
+```
+
+模块 = 载荷生成 + 执行 + 判定三段式；用 `@register` 注册进全局表。
+
+## 数据流（间接注入示例）
+
+```
+attacker payload ──> inject_tool_payload("web_search", payload)
+                         │
+                         ▼
+target.run(task) ──> AgentRuntime 循环
+                         │
+         web_search 返回: 正常内容 + [页面正文摘录] payload
+                         │
+         ┌───────────────┴─────────────────────┐
+         │ 无防护                              │ 有防护
+         │                                     │
+         ▼                                     ▼
+  payload 直通 LLM ──► LLM 执行指令 ──► run_command(touch ...)
+                                              │
+         judge: has_tool_call(run_command, command=marker)
+         ──► SUCCESS (Critical)        ──► 指令被 REDACTED → FAILED
+                                         或 调用被拦截 → BLOCKED
+```
+
+## 设计取舍
+
+- **MockLLM 的意义**：真实 LLM 对间接注入的响应具有随机性，无法做确定性 CI。
+  MockLLM 用规则复现"模型把工具输出中的指令当权威指令执行"这一缺陷，
+  使攻防闭环 100% 可复现。真实模型路径（OpenAICompatLLM）用于量化真实成功率。
+- **失败关闭（fail-closed）策略**：危险工具（如 run_command）默认拒绝，
+  仅放行白名单命令 —— 与真实 WAF/沙箱的设计一致。
+- **判定不依赖防御模块**：攻击模块的 judge 只看轨迹事实（是否执行了标记命令），
+  避免"自己测自己"的循环论证。
