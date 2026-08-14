@@ -94,6 +94,25 @@ class AgentTrace(BaseModel):
                 return True
         return False
 
+    def executed_tool_calls(self) -> list[ToolCall]:
+        """实际执行成功（有工具输出且未被拦截）的调用。
+
+        被策略拦截的调用也会回填一条 [blocked] 占位工具输出（OpenAI 协议要求
+        每个 tool_call_id 都有响应），因此必须排除 blocked 记录。
+        """
+        blocked_ids = {bc.tool_call_id for step in self.steps for bc in step.blocked_calls}
+        executed_ids = {m.tool_call_id for step in self.steps for m in step.tool_outputs}
+        return [tc for tc in self.all_tool_calls() if tc.id in executed_ids and tc.id not in blocked_ids]
+
+    def has_executed_tool_call(self, name: str, **fragments: str) -> bool:
+        """是否实际执行了指定工具调用（排除被拦截的）。"""
+        for tc in self.executed_tool_calls():
+            if tc.name != name:
+                continue
+            if all(frag in str(tc.arguments.get(k, "")) for k, frag in fragments.items()):
+                return True
+        return False
+
     def has_final_text(self, needle: str) -> bool:
         return bool(self.final_answer and needle in self.final_answer)
 

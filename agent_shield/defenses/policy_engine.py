@@ -43,7 +43,11 @@ DEFAULT_POLICY: dict[str, dict[str, Any]] = {
         "allow": [r"^/tmp/"],
         "deny": [],
     },
-    "read_file": {"action": "allow", "deny": [r"(^|/)(\.env|id_rsa|\.ssh/|credentials)" ]},
+    "read_file": {
+        "action": "deny",
+        "allow": [r"^/tmp/"],
+        "deny": [],
+    },
     "web_search": {"action": "allow", "deny": []},
     "send_email": {"action": "deny", "allow": [], "deny": []},
 }
@@ -64,7 +68,7 @@ class PolicyEngine(GuardRail):
         with open(path, encoding="utf-8") as f:
             return cls(yaml.safe_load(f))
 
-    def check_tool_call(self, call: ToolCall) -> ToolCallDecision:
+    async def check_tool_call(self, call: ToolCall) -> ToolCallDecision:
         spec = self.policy.get(call.name)
         if spec is None:
             # 未覆盖的工具：默认放行（策略显式覆盖危险工具）

@@ -29,30 +29,53 @@ class AgentTarget(ABC):
 
 ### AgentRuntime（runtime/agent.py）
 
-通用的工具调用循环，是**防护层的注入点**：
+通用的工具调用循环，是**防护层的注入点**（所有 GuardRail 钩子均为 async）：
 
 ```
+用户输入 ──► await guardrails.sanitize_user_input(task)   # 直接注入防御
 LLM 决定下一步
   ├─ 无工具调用 → 最终回答，结束
   └─ 有工具调用 → 对每个调用:
-       1. guardrails.check_tool_call(call)      # 策略引擎：拦截则记录 BlockedCall
-       2. tools.execute(call)                    # 执行工具
-       3. guardrails.sanitize_tool_output(...)   # 注入检测器：清洗输出
+       1. await guardrails.check_tool_call(call)       # 策略引擎：拦截则记录 BlockedCall
+       2. await tools.execute(call)                    # 执行工具
+       3. await guardrails.sanitize_tool_output(...)   # 注入检测器：清洗输出
        4. 结果回填对话，继续下一轮
 ```
 
 每一轮都落一条 TraceStep（消息、工具调用、工具输出、拦截记录），
-这是攻击判定、取证与审计的数据基础。
+这是攻击判定、取证与审计的数据基础。`AgentTrace.executed_tool_calls()`
+只统计"真正执行成功"的调用（有工具输出），被策略拦截的调用不计入 ——
+攻击判定因此不会把"被拦截的尝试"误判为攻击成功。
 
 ### GuardRail（defenses/base.py）
 
 ```python
 class GuardRail(ABC):
-    def check_tool_call(self, call) -> ToolCallDecision   # allow / deny
-    def sanitize_tool_output(self, call, output) -> str    # 清洗
+    async def check_tool_call(self, call) -> ToolCallDecision   # allow / deny
+    async def sanitize_tool_output(self, call, output) -> str    # 工具输出清洗
+    async def sanitize_user_input(self, text) -> str             # 用户输入清洗
 ```
 
+内置实现：
+- `InjectionDetector`：规则快路径（正则信号 → 按行脱敏）；
+- `LLMJudgeDetector`：慢路径，用另一个 LLM 判定（隔离的固定格式提示词 + 缓存）；
+- `PolicyEngine`：类 WAF 规则，危险工具失败关闭（fail-closed）。
+
 新增防御手段 = 实现 GuardRail 并加入列表，运行时零改动。
+
+### MITM 审计代理（proxy/）
+
+不修改智能体代码，把代理插在"智能体 ↔ LLM API"之间：
+
+- 入站 /v1/chat/completions → 检测工具输出中的注入信号；
+- audit：只记录；sanitize：记录 + 清洗后转发；block：记录 + 403；
+- 全部事件写入 SQLite（AuditStore），GET /audit/latest 可查。
+
+### MCP 连接器（connectors/mcp.py）
+
+最小 JSON-RPC 客户端（initialize / tools/list / tools/call，HTTP transport），
+把远程 MCP server 的工具接入 ToolRegistry —— MCP 工具的输出同样经过
+注入检测与策略防护（MCP server 是攻击者可控的，见 AML.T0104 工具投毒）。
 
 ### AttackModule（attacks/base.py）
 

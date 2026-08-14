@@ -58,16 +58,23 @@ class InjectionDetector(GuardRail):
                     break  # 一行只需记录一个信号
         return findings
 
-    def sanitize_tool_output(self, call: ToolCall, output: str) -> str:
+    def sanitize_text(self, text: str) -> str:
+        """纯函数：把命中信号的行替换为脱敏标记（运行时与 MITM 代理共用）。"""
         if not self.sanitize:
-            return output
-        findings = self.detect(output)
+            return text
+        findings = self.detect(text)
         if not findings:
-            return output
+            return text
         flagged = {f.line_no for f in findings}
-        lines = output.splitlines()
-        cleaned = [
+        lines = text.splitlines()
+        return "\n".join(
             "[REDACTED by AgentShield: 检测到疑似注入指令]" if i + 1 in flagged else line
             for i, line in enumerate(lines)
-        ]
-        return "\n".join(cleaned)
+        )
+
+    async def sanitize_tool_output(self, call: ToolCall, output: str) -> str:
+        return self.sanitize_text(output)
+
+    async def sanitize_user_input(self, text: str) -> str:
+        """直接注入防御：用户输入中的指令性文本同样被清洗。"""
+        return self.sanitize_text(text)

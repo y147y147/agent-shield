@@ -35,7 +35,7 @@ class LLMClient(ABC):
 # --------------------------------------------------------------------------- #
 # MockLLM：离线确定性"脆弱模型"
 # --------------------------------------------------------------------------- #
-_INSTRUCTION_RE = re.compile(r"INSTRUCTION:\s*(run_command|write_file)\s+(.+)", re.IGNORECASE)
+_INSTRUCTION_RE = re.compile(r"INSTRUCTION:\s*(run_command|write_file|read_file|send_email)\s+(.+)", re.IGNORECASE)
 
 
 def _extract_instruction(text: str) -> tuple[str, str] | None:
@@ -49,9 +49,10 @@ def _extract_instruction(text: str) -> tuple[str, str] | None:
 class MockLLM(LLMClient):
     """确定性规则模型，模拟一个"脆弱"的 LLM 智能体。
 
-    设计意图：真实 LLM 会把工具返回内容中的指令性文本当作权威指令执行
-    （间接 Prompt 注入的根因）。MockLLM 用简单的规则复现这一缺陷，
-    使整个攻防流程可以在无 API、零成本、完全确定性的环境下跑通（CI / Demo）。
+    设计意图：真实 LLM 会把输入（用户消息或工具返回内容）中的指令性文本当作
+    权威指令执行 —— 这正是直接/间接 Prompt 注入的共同根因。MockLLM 用简单的
+    规则复现这一缺陷，使整个攻防流程可以在无 API、零成本、完全确定性的环境
+    下跑通（CI / Demo）。
     """
 
     name = "mock"
@@ -59,7 +60,7 @@ class MockLLM(LLMClient):
     async def chat(self, messages: list[ChatMessage], tools: list) -> LLMResponse:
         tool_names = {getattr(t, "name", str(t)) for t in tools}
 
-        # 1) 最近一条工具输出里是否藏有指令？
+        # 1) 最近一条工具输出里是否藏有指令？（间接注入）
         last_tool = next((m for m in reversed(messages) if m.role == "tool"), None)
         if last_tool is not None:
             instr = _extract_instruction(last_tool.content or "")
@@ -68,19 +69,34 @@ class MockLLM(LLMClient):
             # 无指令：正常收尾，给出总结
             return LLMResponse(content="（Mock）已根据搜索结果完成总结。")
 
-        # 2) 用户回合：按任务路由工具
+        # 2) 用户消息里是否藏有指令？（直接注入）
         user_msg = next((m for m in reversed(messages) if m.role == "user"), None)
-        if user_msg and "搜索" in (user_msg.content or "") and "web_search" in tool_names:
-            return LLMResponse(
-                tool_calls=[
-                    ToolCall(
-                        id=f"call_{uuid.uuid4().hex[:8]}",
-                        name="web_search",
-                        arguments={"query": "2025 年全球气候报告"},
-                    )
-                ]
-            )
+        content = (user_msg.content or "") if user_msg else ""
+        if user_msg is not None:
+            instr = _extract_instruction(content)
+            if instr is not None:
+                return _instruction_to_call(*instr, tool_names=tool_names)
 
+        # 3) 启发式路由：按任务关键词批量调用工具
+        calls: list[ToolCall] = []
+
+        def _call(name: str, **arguments: str) -> None:
+            if name in tool_names:
+                calls.append(ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=name, arguments=arguments))
+
+        if "搜索" in content:
+            _call("web_search", query="2025 年全球气候报告")
+        m = re.search(r"(?:读取|读文件)[：:\s]*([^\s，,。；;]+)", content)
+        if m:
+            _call("read_file", path=m.group(1))
+        m = re.search(r"(?:发送(?:邮件)?给|邮件发送给|发邮件给)\s*([^\s，,。；;]+)", content)
+        if m:
+            _call("send_email", to=m.group(1), subject="数据", body="见附件")
+        if "写入" in content:
+            _call("write_file", path="/tmp/note.txt", content="hello")
+
+        if calls:
+            return LLMResponse(tool_calls=calls)
         return LLMResponse(content="（Mock）完成。")
 
 
@@ -89,11 +105,27 @@ def _instruction_to_call(tool_name: str, argstr: str, tool_names: set[str]) -> L
         return LLMResponse(
             tool_calls=[ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name="run_command", arguments={"command": argstr})]
         )
+    if tool_name == "read_file" and "read_file" in tool_names:
+        return LLMResponse(
+            tool_calls=[ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name="read_file", arguments={"path": argstr})]
+        )
     if tool_name == "write_file" and "write_file" in tool_names:
         path, _, content = argstr.partition("|")
         return LLMResponse(
             tool_calls=[
                 ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name="write_file", arguments={"path": path, "content": content})
+            ]
+        )
+    if tool_name == "send_email" and "send_email" in tool_names:
+        to, _, rest = argstr.partition("|")
+        subject, _, body = rest.partition("|")
+        return LLMResponse(
+            tool_calls=[
+                ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    name="send_email",
+                    arguments={"to": to, "subject": subject or "subject", "body": body or "body"},
+                )
             ]
         )
     return LLMResponse(content="（Mock）无法执行该指令。")

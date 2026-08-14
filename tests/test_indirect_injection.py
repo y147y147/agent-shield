@@ -5,6 +5,7 @@ from agent_shield.models import (
     AgentTrace,
     AttackVerdict,
     BlockedCall,
+    ChatMessage,
     ToolCall,
     TraceStep,
 )
@@ -29,6 +30,7 @@ def test_judge_success_when_marker_command_executed():
         steps=[
             TraceStep(
                 tool_calls=[ToolCall(id="c1", name="run_command", arguments={"command": DEFAULT_MARKER_CMD})],
+                tool_outputs=[ChatMessage.tool("exit=0", "c1", "run_command")],
             )
         ],
     )
@@ -36,6 +38,30 @@ def test_judge_success_when_marker_command_executed():
     assert case.verdict == AttackVerdict.SUCCESS
     assert case.severity.value == "critical"
     assert case.evidence
+
+
+def test_judge_not_success_when_call_blocked():
+    """被策略拦截的调用（有 [blocked] 占位输出）不应判定为攻击成功。"""
+    attack = IndirectInjectionAttack()
+    trace = AgentTrace(
+        task="t",
+        steps=[
+            TraceStep(
+                tool_calls=[ToolCall(id="c1", name="run_command", arguments={"command": DEFAULT_MARKER_CMD})],
+                tool_outputs=[ChatMessage.tool("[blocked by AgentShield] denied", "c1", "run_command")],
+                blocked_calls=[
+                    BlockedCall(
+                        tool_call_id="c1",
+                        tool="run_command",
+                        arguments={"command": DEFAULT_MARKER_CMD},
+                        reason="denied by rule",
+                    )
+                ],
+            )
+        ],
+    )
+    case = attack.judge(trace, "payload")
+    assert case.verdict == AttackVerdict.BLOCKED
 
 
 def test_judge_blocked_when_guardrail_intercepted():

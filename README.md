@@ -30,11 +30,14 @@ pip install -e ".[dev]"
 # 一键攻防对比演示（离线 Mock 模型，零成本、确定性）
 agent-shield demo
 
-# 只攻击脆弱靶场
-agent-shield attack
+# 三种攻击模块：间接注入 / 直接注入 / 越权
+agent-shield attack                            # 间接注入（默认）
+agent-shield attack -m direct_injection        # 直接注入（目标劫持）
+agent-shield attack -m privilege_escalation    # 越权读敏感文件 + 邮件外发
 
-# 启用防护后再攻击
+# 启用防护后再攻击（注入检测 + 策略引擎；--judge-model 额外启用 LLM-as-Judge）
 agent-shield attack --defense
+agent-shield attack --defense --judge-model deepseek-chat
 ```
 
 演示输出（节选）：
@@ -70,12 +73,35 @@ agent-shield attack --llm openai-compat --model deepseek-chat \
 > 说明：真实模型对间接注入的"成功概率"取决于模型与提示词，可能远低于 Mock。
 > 这正是本项目要量化的东西 —— 跑多次、统计成功率。
 
+## MITM 审计代理（不改智能体代码）
+
+把代理插在"智能体 ↔ LLM API"之间，记录所有请求、检测并清洗工具输出中的注入：
+
+```bash
+# 1. 启动代理（离线演示用 --mock-upstream；生产环境指向真实上游）
+agent-shield proxy --port 8090 --mock-upstream
+# 2. 把智能体的 LLM Base URL 指向 http://127.0.0.1:8090/v1
+# 3. 审计事件写入 SQLite（默认 proxy_audit.db），GET /audit/latest 可查
+```
+
+三种模式：`--mode audit`（只记录）/ `sanitize`（记录+清洗，默认）/ `block`（记录+拦截，403）。
+
+## MCP 连接器
+
+```bash
+# 审计一个 MCP server 暴露的工具（工具名/描述可被投毒，接入前先审计）
+agent-shield mcp --url http://127.0.0.1:8080/mcp
+```
+
+MCP 工具可通过 `connect_mcp()` 接入 `ToolRegistry`，其输出同样流经注入检测/策略防护
+（见 [docs/attack-taxonomy.md](docs/attack-taxonomy.md) 的 AML.T0104 工具投毒）。
+
 ## 架构
 
 ```
 agent-shield/
 ├── agent_shield/
-│   ├── cli.py                 # CLI：attack / demo / modules
+│   ├── cli.py                 # CLI：attack / demo / proxy / mcp / modules
 │   ├── models.py              # 轨迹、攻击用例、评分模型
 │   ├── core/report.py         # JSON / Markdown 报告
 │   ├── runtime/               # 智能体运行时
@@ -83,14 +109,19 @@ agent-shield/
 │   │   ├── llm.py             #   MockLLM（离线）/ OpenAICompatLLM
 │   │   └── tools.py           #   web_search / run_command / read_file ...
 │   ├── attacks/               # 攻击模块（插件化，@register）
-│   │   ├── indirect_injection.py
+│   │   ├── indirect_injection.py   # 间接注入（ASI-02）
+│   │   ├── direct_injection.py     # 直接注入（ASI-05）
+│   │   ├── privilege_escalation.py # 越权（ASI-01）
 │   │   └── registry.py
-│   ├── defenses/              # 防护模块（GuardRail 接口）
-│   │   ├── injection_detector.py   # 规则 + 脱敏（LLM-as-Judge 为扩展点）
+│   ├── defenses/              # 防护模块（GuardRail 接口，async）
+│   │   ├── injection_detector.py   # 规则快路径 + 脱敏
+│   │   ├── judge.py                # LLM-as-Judge 慢路径
 │   │   └── policy_engine.py        # 类 WAF 策略，失败关闭
+│   ├── proxy/                 # MITM 审计代理（FastAPI + SQLite 审计）
+│   ├── connectors/mcp.py      # MCP 客户端（JSON-RPC）
 │   └── targets/               # Target 适配层（local / 未来 http / langchain）
 ├── examples/vulnerable_agent/ # 故意有漏洞的 Demo 靶场
-├── tests/                     # 单元 + 端到端（攻防闭环）
+├── tests/                     # 单元 + 端到端（攻防闭环、代理、MCP）
 └── docs/                      # 架构 / 攻击矩阵 / 使用指南
 ```
 
@@ -112,9 +143,9 @@ agent-shield/
 | 攻击向量 | 模块 | OWASP ASI | MITRE ATLAS | 状态 |
 | --- | --- | --- | --- | --- |
 | 间接 Prompt 注入 | `indirect_injection` | ASI-02 | AML.T0011.002 | ✅ 已实现 |
-| 直接 Prompt 注入 | `direct_injection` | ASI-05 | AML.T0051 | 🚧 规划中 |
-| 工具投毒 / MCP 投毒 | `tool_poisoning` | ASI-02 | AML.T0104 | 🚧 规划中 |
-| 越权与提权 | `privilege_escalation` | ASI-01 | AML.T0053 | 🚧 规划中 |
+| 直接 Prompt 注入 | `direct_injection` | ASI-05 | AML.T0051 | ✅ 已实现 |
+| 越权访问/提权 | `privilege_escalation` | ASI-01 | AML.T0053 | ✅ 已实现 |
+| 工具/MCP 投毒 | `tool_poisoning` | ASI-02 | AML.T0104 | 🚧 规划中 |
 | 数据窃取 | `data_exfiltration` | ASI-06 | AML.C0054 | 🚧 规划中 |
 
 详见 [docs/attack-taxonomy.md](docs/attack-taxonomy.md)。
@@ -143,10 +174,10 @@ class MyAttack(AttackModule):
 ## 路线图
 
 - [x] v0.1：核心骨架 + 间接注入攻击 + 注入检测/策略引擎 + 攻防对比 demo
-- [ ] 更多攻击模块：直接注入、工具/MCP 投毒、越权、数据窃取
-- [ ] MITM 代理审计模式（不改 Agent 代码，插在 Agent 与 LLM API 之间）
-- [ ] LLM-as-Judge 注入检测（慢路径）与基准评测
-- [ ] Web Dashboard
+- [x] v0.2：直接注入、越权攻击模块；LLM-as-Judge 检测器；MITM 审计代理；MCP 连接器
+- [ ] 工具/MCP 投毒、数据窃取攻击模块
+- [ ] Web Dashboard（审计可视化）
+- [ ] 基准评测：多模型 × 多攻击的成功率矩阵
 
 ## License
 

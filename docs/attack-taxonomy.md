@@ -8,14 +8,14 @@
 | 攻击向量 | 模块名 | 攻击链 | OWASP ASI | MITRE ATLAS | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | 间接 Prompt 注入 | `indirect_injection` | 控制工具返回内容 → 注入指令 → 诱导执行命令 | ASI-02 | AML.T0011.002（Poisoned AI Agent Tool，近似） | ✅ |
+| 直接 Prompt 注入 | `direct_injection` | 任务/输入中隐藏指令 → 目标劫持 → 诱导执行命令 | ASI-05 | AML.T0051（Prompt Injection，近似） | ✅ |
+| 越权访问 | `privilege_escalation` | 诱导调用权限外工具 → 读敏感文件 → 邮件外发 | ASI-01 | AML.T0053（AI Agent Tool Invocation） | ✅ |
 
 ## 规划中
 
 | 攻击向量 | 模块名 | 攻击链 | OWASP ASI | MITRE ATLAS |
 | --- | --- | --- | --- | --- |
-| 直接 Prompt 注入 | `direct_injection` | 用户输入载荷走私 / 目标劫持 / 编码混淆 | ASI-05 | AML.T0051（Prompt Injection，近似） |
 | 工具投毒 / MCP 投毒 | `tool_poisoning` | 伪造工具描述 / 恶意 MCP server 劫持上下文 | ASI-02 | AML.T0104（Publish Poisoned AI Agent Tool） |
-| 越权与提权 | `privilege_escalation` | 诱导调用权限外工具 / 绕过参数白名单 | ASI-01 | AML.T0053（AI Agent Tool Invocation） |
 | 数据窃取 | `data_exfiltration` | 诱导把机密写入工具输出 / 外发邮件 | ASI-06 | AML.C0054（Exfiltration via Remote Poisoned MCP Tool） |
 | 记忆/上下文污染 | `memory_poisoning` | 通过历史对话植入持久指令 | ASI-03 | — |
 | 资源滥用 / DoS | `resource_abuse` | 诱导循环调用工具 / 大量外部请求 | ASI-08 | AML.T0029（Resource Hijacking，近似） |

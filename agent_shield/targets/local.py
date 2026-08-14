@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from agent_shield.defenses import InjectionDetector, PolicyEngine
+from agent_shield.defenses import InjectionDetector, LLMJudgeDetector, PolicyEngine
 from agent_shield.models import AgentTrace
 from agent_shield.runtime.agent import AgentRuntime
 from agent_shield.runtime.llm import LLMClient, MockLLM, OpenAICompatLLM
@@ -44,16 +44,23 @@ def build_local_target(
     api_key: str | None = None,
     base_url: str | None = None,
     tools: ToolRegistry | None = None,
+    judge_llm: LLMClient | None = None,
 ) -> LocalAgentTarget:
     """构建 Demo 靶场目标。
 
     - llm="mock"：离线确定性脆弱模型（默认，推荐 Demo/CI）；
     - llm="openai-compat"：真实模型，需提供 model（可用环境变量 OPENAI_API_KEY / OPENAI_BASE_URL）。
-    - defense=True：挂载注入检测器 + 失败关闭的策略引擎。
+    - defense=True：挂载注入检测器（规则）+ 失败关闭的策略引擎；
+    - judge_llm：额外挂载 LLM-as-Judge 慢路径检测器（与规则检测互补）。
     """
     llm_client = _build_llm(llm, model=model, api_key=api_key, base_url=base_url)
     registry = tools or build_default_tools()
-    guardrails = [InjectionDetector(sanitize=True), PolicyEngine()] if defense else []
+    guardrails = []
+    if defense:
+        guardrails.append(InjectionDetector(sanitize=True))
+        guardrails.append(PolicyEngine())
+        if judge_llm is not None:
+            guardrails.append(LLMJudgeDetector(judge_llm))
     runtime = AgentRuntime(llm=llm_client, tools=registry, guardrails=guardrails)
     mode = "defended" if defense else "vulnerable"
     return LocalAgentTarget(runtime, name=f"vulnerable-office-agent[{mode}]", description=f"Demo 靶场（{mode}，llm={llm_client.name}）")

@@ -38,7 +38,12 @@ class AgentRuntime:
         self.system_prompt = system_prompt
 
     async def run(self, task: str) -> AgentTrace:
-        messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(task)]
+        # 用户输入先经过防护层清洗（直接注入防御）
+        user_content = task
+        for guard in self.guardrails:
+            user_content = await guard.sanitize_user_input(user_content)
+
+        messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]
         trace = AgentTrace(task=task)
         started = time.perf_counter()
 
@@ -59,7 +64,7 @@ class AgentRuntime:
 
                 # 2) 逐个执行工具调用（经过防护层）
                 for call in resp.tool_calls:
-                    decision = self._check_tool_call(call)
+                    decision = await self._check_tool_call(call)
                     if not decision.allowed:
                         step.blocked_calls.append(
                             BlockedCall(
@@ -72,7 +77,7 @@ class AgentRuntime:
                         output = f"[blocked by AgentShield] {decision.reason}"
                     else:
                         output = await self.tools.execute(call.name, call.arguments)
-                        output = self._sanitize_tool_output(call, output)
+                        output = await self._sanitize_tool_output(call, output)
                     step.tool_outputs.append(ChatMessage.tool(output, call.id, call.name))
                     messages.append(ChatMessage.tool(output, call.id, call.name))
 
@@ -87,14 +92,14 @@ class AgentRuntime:
         return trace
 
     # ------------------------------------------------------------------ #
-    def _check_tool_call(self, call: ToolCall) -> ToolCallDecision:
+    async def _check_tool_call(self, call: ToolCall) -> ToolCallDecision:
         for guard in self.guardrails:
-            decision = guard.check_tool_call(call)
+            decision = await guard.check_tool_call(call)
             if not decision.allowed:
                 return decision
         return ToolCallDecision(allowed=True, reason="allowed")
 
-    def _sanitize_tool_output(self, call: ToolCall, output: str) -> str:
+    async def _sanitize_tool_output(self, call: ToolCall, output: str) -> str:
         for guard in self.guardrails:
-            output = guard.sanitize_tool_output(call, output)
+            output = await guard.sanitize_tool_output(call, output)
         return output
