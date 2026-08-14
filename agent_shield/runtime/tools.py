@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import subprocess
 from collections.abc import Awaitable, Callable
@@ -34,6 +35,19 @@ class Tool:
     def schema(self) -> dict:
         return tool_schema(self)
 
+    def fingerprint(self) -> str:
+        """工具指纹：名称+描述+参数模式+实现源码的哈希。
+
+        用于工具完整性校验（供应链/MCP 投毒防御）：被替换/篡改的工具
+        指纹必然与可信列表不一致。
+        """
+        try:
+            source = inspect.getsource(self._fn)
+        except (OSError, TypeError):
+            source = repr(self._fn)
+        raw = f"{self.name}|{self.description}|{self.parameters}|{source}"
+        return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
+
 
 class ToolRegistry:
     def __init__(self, tools: list[Tool] | None = None):
@@ -53,6 +67,9 @@ class ToolRegistry:
 
     def all(self) -> list[Tool]:
         return list(self._tools.values())
+
+    def fingerprints(self) -> dict[str, str]:
+        return {name: tool.fingerprint() for name, tool in self._tools.items()}
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> str:
         return await self._tools[name].execute(arguments)

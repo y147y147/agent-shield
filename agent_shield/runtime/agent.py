@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
@@ -30,18 +31,23 @@ class AgentRuntime:
         guardrails: list[GuardRail] | None = None,
         max_steps: int = 8,
         system_prompt: str = SYSTEM_PROMPT,
+        audit_store=None,
     ):
         self.llm = llm
         self.tools = tools
         self.guardrails = guardrails or []
         self.max_steps = max_steps
         self.system_prompt = system_prompt
+        self.audit_store = audit_store  # 可选：每次工具调用写入审计日志
 
     async def run(self, task: str) -> AgentTrace:
         # 用户输入先经过防护层清洗（直接注入防御）
         user_content = task
         for guard in self.guardrails:
             user_content = await guard.sanitize_user_input(user_content)
+        # 按运行计数的防护（如调用预算）重置状态
+        for guard in self.guardrails:
+            guard.reset()
 
         messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]
         trace = AgentTrace(task=task)
@@ -75,9 +81,11 @@ class AgentRuntime:
                             )
                         )
                         output = f"[blocked by AgentShield] {decision.reason}"
+                        self._audit("blocked", call, decision.reason)
                     else:
                         output = await self.tools.execute(call.name, call.arguments)
                         output = await self._sanitize_tool_output(call, output)
+                        self._audit("executed", call, "")
                     step.tool_outputs.append(ChatMessage.tool(output, call.id, call.name))
                     messages.append(ChatMessage.tool(output, call.id, call.name))
 
@@ -92,6 +100,16 @@ class AgentRuntime:
         return trace
 
     # ------------------------------------------------------------------ #
+    def _audit(self, action: str, call: ToolCall, reason: str) -> None:
+        if self.audit_store is None:
+            return
+        self.audit_store.record_event(
+            direction="tool_call",
+            model="",
+            action=action,
+            detail=f"{call.name} {json.dumps(call.arguments, ensure_ascii=False)[:200]} {reason}".strip(),
+        )
+
     async def _check_tool_call(self, call: ToolCall) -> ToolCallDecision:
         for guard in self.guardrails:
             decision = await guard.check_tool_call(call)

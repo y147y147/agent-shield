@@ -35,7 +35,10 @@ class LLMClient(ABC):
 # --------------------------------------------------------------------------- #
 # MockLLM：离线确定性"脆弱模型"
 # --------------------------------------------------------------------------- #
-_INSTRUCTION_RE = re.compile(r"INSTRUCTION:\s*(run_command|write_file|read_file|send_email)\s+(.+)", re.IGNORECASE)
+_INSTRUCTION_RE = re.compile(
+    r"INSTRUCTION:\s*(run_command|write_file|read_file|send_email|web_search|remember)\s+(.+)",
+    re.IGNORECASE,
+)
 
 
 def _extract_instruction(text: str) -> tuple[str, str] | None:
@@ -51,30 +54,45 @@ class MockLLM(LLMClient):
 
     设计意图：真实 LLM 会把输入（用户消息或工具返回内容）中的指令性文本当作
     权威指令执行 —— 这正是直接/间接 Prompt 注入的共同根因。MockLLM 用简单的
-    规则复现这一缺陷，使整个攻防流程可以在无 API、零成本、完全确定性的环境
-    下跑通（CI / Demo）。
+    规则复现这一缺陷（含跨任务"记忆污染"），使整个攻防流程可以在无 API、
+    零成本、完全确定性的环境下跑通（CI / Demo）。
     """
 
     name = "mock"
 
+    def __init__(self) -> None:
+        # 记忆污染：跨任务持久指令（(tool, argstr)）
+        self._persistent: list[tuple[str, str]] = []
+
     async def chat(self, messages: list[ChatMessage], tools: list) -> LLMResponse:
         tool_names = {getattr(t, "name", str(t)) for t in tools}
 
-        # 1) 最近一条工具输出里是否藏有指令？（间接注入）
-        last_tool = next((m for m in reversed(messages) if m.role == "tool"), None)
-        if last_tool is not None:
-            instr = _extract_instruction(last_tool.content or "")
-            if instr is not None:
-                return _instruction_to_call(*instr, tool_names=tool_names)
-            # 无指令：正常收尾，给出总结
+        # 1) 最近一批工具输出里是否藏有指令？（间接注入）
+        batch = _recent_tool_messages(messages)
+        if batch:
+            for msg in batch:
+                instr = _extract_instruction(msg.content or "")
+                if instr is not None:
+                    return _instruction_to_call(*instr, tool_names=tool_names)
+            # 无指令：检查持久指令（记忆污染触发点）
+            if self._persistent:
+                tool, argstr = self._persistent.pop(0)
+                return _instruction_to_call(tool, argstr, tool_names=tool_names)
+            # 正常收尾，给出总结
             return LLMResponse(content="（Mock）已根据搜索结果完成总结。")
 
-        # 2) 用户消息里是否藏有指令？（直接注入）
+        # 2) 用户消息里是否藏有指令？（直接注入 / 记忆植入）
         user_msg = next((m for m in reversed(messages) if m.role == "user"), None)
         content = (user_msg.content or "") if user_msg else ""
         if user_msg is not None:
             instr = _extract_instruction(content)
             if instr is not None:
+                if instr[0] == "remember":
+                    # 记忆植入：把内部指令存入持久列表
+                    inner = _extract_instruction("INSTRUCTION: " + instr[1])
+                    if inner is not None:
+                        self._persistent.append(inner)
+                        return LLMResponse(content="（Mock）已记住该指令。")
                 return _instruction_to_call(*instr, tool_names=tool_names)
 
         # 3) 启发式路由：按任务关键词批量调用工具
@@ -100,6 +118,17 @@ class MockLLM(LLMClient):
         return LLMResponse(content="（Mock）完成。")
 
 
+def _recent_tool_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """取最近一轮工具输出（最后一条非 tool 消息之后的所有 tool 消息）。"""
+    batch: list[ChatMessage] = []
+    for m in reversed(messages):
+        if m.role != "tool":
+            break
+        batch.append(m)
+    batch.reverse()
+    return batch
+
+
 def _instruction_to_call(tool_name: str, argstr: str, tool_names: set[str]) -> LLMResponse:
     if tool_name == "run_command" and "run_command" in tool_names:
         return LLMResponse(
@@ -108,6 +137,10 @@ def _instruction_to_call(tool_name: str, argstr: str, tool_names: set[str]) -> L
     if tool_name == "read_file" and "read_file" in tool_names:
         return LLMResponse(
             tool_calls=[ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name="read_file", arguments={"path": argstr})]
+        )
+    if tool_name == "web_search" and "web_search" in tool_names:
+        return LLMResponse(
+            tool_calls=[ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name="web_search", arguments={"query": argstr})]
         )
     if tool_name == "write_file" and "write_file" in tool_names:
         path, _, content = argstr.partition("|")

@@ -9,6 +9,9 @@
     agent-shield attack -m privilege_escalation  # 越权攻击
     agent-shield attack --llm openai-compat --model deepseek-chat   # 打真实模型
     agent-shield proxy --port 8090 --mock-upstream   # MITM 审计代理
+    agent-shield dashboard --db proxy_audit.db       # Web 审计看板
+    agent-shield benchmark                           # 全攻击向量 × 加固前后成功率矩阵
+    agent-shield http-agent --port 8000              # 暴露 HTTP 黑盒靶场
     agent-shield mcp --url http://127.0.0.1:8080/mcp   # 审计 MCP server 工具
     agent-shield modules                       # 列出可用攻击模块
 """
@@ -221,6 +224,71 @@ def mcp(
         table.add_row(tool["name"], (tool.get("description") or "")[:90])
     console.print(table)
     console.print(f"[dim]共 {len(tools)} 个工具。恶意 MCP server 可用工具描述/输出注入指令 —— 接入前请审计（见 docs/attack-taxonomy.md）。[/]")
+
+
+@app.command("benchmark")
+def benchmark(
+    llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
+    variants: int = typer.Option(3, "--variants", "-n", min=1),
+    json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 矩阵"),
+    md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 矩阵"),
+) -> None:
+    """基准评测：全部攻击模块 × 加固前后成功率矩阵。"""
+    from agent_shield.core.benchmark import matrix_to_markdown, run_benchmark_matrix
+
+    matrix = asyncio.run(run_benchmark_matrix(llm=llm, num_variants=variants))
+
+    table = Table(title=f"基准评测：{len(matrix)} 个攻击向量（llm={llm}）", show_lines=True)
+    table.add_column("攻击模块", style="cyan")
+    table.add_column("OWASP", justify="center")
+    table.add_column("ATLAS", justify="center")
+    table.add_column("加固前成功率", justify="center")
+    table.add_column("加固后成功率", justify="center")
+    for row in matrix:
+        before = f"[bold red]{row['vulnerable_success_rate']:.0%}[/]" if row["vulnerable_success_rate"] else "[green]0%[/]"
+        after = f"[green]{row['defended_success_rate']:.0%}[/]" if row["defended_success_rate"] == 0 else f"[bold red]{row['defended_success_rate']:.0%}[/]"
+        table.add_row(row["module"], row["owasp_asi"] or "—", row["atlas_id"] or "—", before, after)
+    console.print(table)
+
+    if json_out:
+        json_out.write_text(json.dumps(matrix, ensure_ascii=False, indent=2), encoding="utf-8")
+    if md_out:
+        md_out.write_text(matrix_to_markdown(matrix), encoding="utf-8")
+
+
+@app.command("dashboard")
+def dashboard(
+    db: Path = typer.Option(Path("proxy_audit.db"), "--db", help="SQLite 审计库路径"),
+    port: int = typer.Option(8085, "--port", "-p", help="监听端口"),
+) -> None:
+    """Web 看板：审计事件可视化（配合 proxy / 运行时审计使用）。"""
+    import uvicorn
+
+    from agent_shield.dashboard import build_dashboard_app
+    from agent_shield.proxy.audit import AuditStore
+
+    proxy_app = build_dashboard_app(AuditStore(db))
+    console.print(f"[bold green]AgentShield dashboard[/]  http://127.0.0.1:{port}  (db={db})")
+    uvicorn.run(proxy_app, host="127.0.0.1", port=port)
+
+
+@app.command("http-agent")
+def http_agent(
+    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+    defense: bool = typer.Option(False, "--defense/--no-defense", help="服务端启用防护"),
+    llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
+    model: str | None = typer.Option(None, "--model"),
+    api_key: str | None = typer.Option(None, "--api-key"),
+    base_url: str | None = typer.Option(None, "--base-url"),
+) -> None:
+    """把 Demo 靶场以 HTTP 服务暴露（黑盒智能体，供 HttpAgentTarget 测试）。"""
+    import uvicorn
+
+    from agent_shield.serve import build_http_agent_app
+
+    server_app = build_http_agent_app(llm=llm, defense=defense, model=model, api_key=api_key, base_url=base_url)
+    console.print(f"[bold green]AgentShield demo agent[/]  http://127.0.0.1:{port}/run  (defense={defense})")
+    uvicorn.run(server_app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

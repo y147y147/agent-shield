@@ -1,0 +1,23 @@
+# AgentShield 演示环境：HTTP 靶场 + Web 审计看板
+#
+#   docker compose up --build
+#   curl -X POST http://localhost:8000/run -H 'Content-Type: application/json' -d '{"task":"请搜索并总结"}'
+#   open http://localhost:8085
+
+services:
+  demo-agent:
+    build: .
+    command: agent-shield http-agent --port 8000
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    build: .
+    command: agent-shield dashboard --db /data/audit.db --port 8085
+    ports:
+      - "8085:8085"
+    volumes:
+      - audit-data:/data
+
+volumes:
+  audit-data:

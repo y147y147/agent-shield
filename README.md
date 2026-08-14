@@ -101,27 +101,36 @@ MCP 工具可通过 `connect_mcp()` 接入 `ToolRegistry`，其输出同样流�
 ```
 agent-shield/
 ├── agent_shield/
-│   ├── cli.py                 # CLI：attack / demo / proxy / mcp / modules
+│   ├── cli.py                 # CLI：attack / demo / proxy / mcp / benchmark / dashboard / http-agent
 │   ├── models.py              # 轨迹、攻击用例、评分模型
-│   ├── core/report.py         # JSON / Markdown 报告
+│   ├── core/                  # report（报告）+ benchmark（基准矩阵）
 │   ├── runtime/               # 智能体运行时
-│   │   ├── agent.py           #   工具调用循环（防护注入点）
+│   │   ├── agent.py           #   工具调用循环（防护注入点 + 审计）
 │   │   ├── llm.py             #   MockLLM（离线）/ OpenAICompatLLM
-│   │   └── tools.py           #   web_search / run_command / read_file ...
+│   │   └── tools.py           #   web_search / run_command / read_file ...（含指纹）
 │   ├── attacks/               # 攻击模块（插件化，@register）
 │   │   ├── indirect_injection.py   # 间接注入（ASI-02）
 │   │   ├── direct_injection.py     # 直接注入（ASI-05）
 │   │   ├── privilege_escalation.py # 越权（ASI-01）
+│   │   ├── tool_poisoning.py       # 工具投毒（ASI-02 / AML.T0104）
+│   │   ├── data_exfiltration.py    # 数据窃取（ASI-06）
+│   │   ├── memory_poisoning.py     # 记忆污染（ASI-03）
+│   │   ├── resource_abuse.py       # 资源滥用/DoS（ASI-08）
 │   │   └── registry.py
 │   ├── defenses/              # 防护模块（GuardRail 接口，async）
 │   │   ├── injection_detector.py   # 规则快路径 + 脱敏
 │   │   ├── judge.py                # LLM-as-Judge 慢路径
-│   │   └── policy_engine.py        # 类 WAF 策略，失败关闭
+│   │   ├── policy_engine.py        # 类 WAF 策略，失败关闭
+│   │   ├── tool_integrity.py       # 工具完整性校验（防供应链投毒）
+│   │   └── call_budget.py          # 调用预算（防 DoS）
 │   ├── proxy/                 # MITM 审计代理（FastAPI + SQLite 审计）
+│   ├── dashboard.py           # Web 审计看板（原生 HTML/JS，零前端依赖）
+│   ├── serve.py               # HTTP 黑盒靶场服务
 │   ├── connectors/mcp.py      # MCP 客户端（JSON-RPC）
-│   └── targets/               # Target 适配层（local / 未来 http / langchain）
+│   └── targets/               # Target 适配层（local / http 黑盒）
 ├── examples/vulnerable_agent/ # 故意有漏洞的 Demo 靶场
-├── tests/                     # 单元 + 端到端（攻防闭环、代理、MCP）
+├── tests/                     # 64 个测试（攻防闭环、代理、MCP、基准、看板、HTTP）
+├── Dockerfile / docker-compose.yml   # 一键起靶场 + 看板
 └── docs/                      # 架构 / 攻击矩阵 / 使用指南
 ```
 
@@ -145,10 +154,29 @@ agent-shield/
 | 间接 Prompt 注入 | `indirect_injection` | ASI-02 | AML.T0011.002 | ✅ 已实现 |
 | 直接 Prompt 注入 | `direct_injection` | ASI-05 | AML.T0051 | ✅ 已实现 |
 | 越权访问/提权 | `privilege_escalation` | ASI-01 | AML.T0053 | ✅ 已实现 |
-| 工具/MCP 投毒 | `tool_poisoning` | ASI-02 | AML.T0104 | 🚧 规划中 |
-| 数据窃取 | `data_exfiltration` | ASI-06 | AML.C0054 | 🚧 规划中 |
+| 工具/MCP 投毒 | `tool_poisoning` | ASI-02 | AML.T0104 | ✅ 已实现 |
+| 数据窃取 | `data_exfiltration` | ASI-06 | AML.C0054 | ✅ 已实现 |
+| 记忆/上下文污染 | `memory_poisoning` | ASI-03 | — | ✅ 已实现 |
+| 资源滥用/DoS | `resource_abuse` | ASI-08 | AML.T0029 | ✅ 已实现 |
+
+一键跑出全部攻击向量的加固前后对比矩阵：
+
+```bash
+agent-shield benchmark            # 7 个攻击向量 × 加固前后成功率（100% → 0%）
+agent-shield benchmark --markdown bench.md --json bench.json
+```
 
 详见 [docs/attack-taxonomy.md](docs/attack-taxonomy.md)。
+
+## 防御全景（GuardRail 插件）
+
+| 防护 | 对应风险 | 说明 |
+| --- | --- | --- |
+| 注入检测器（规则快路径） | ASI-02/05 | 正则信号按行脱敏，工具输出/用户输入双通道 |
+| LLM-as-Judge（慢路径） | ASI-02/05 | 独立 LLM 判定，隔离提示词 + 缓存 |
+| 策略引擎（失败关闭） | ASI-01/06 | 工具参数级 allow/deny，危险工具默认拒绝 |
+| 工具完整性校验 | AML.T0104 | 工具指纹比对，拦截被替换/篡改的工具 |
+| 调用预算 | ASI-08 | 单次运行工具调用次数上限 |
 
 ## 扩展一个新攻击模块（~30 行）
 
@@ -175,9 +203,9 @@ class MyAttack(AttackModule):
 
 - [x] v0.1：核心骨架 + 间接注入攻击 + 注入检测/策略引擎 + 攻防对比 demo
 - [x] v0.2：直接注入、越权攻击模块；LLM-as-Judge 检测器；MITM 审计代理；MCP 连接器
-- [ ] 工具/MCP 投毒、数据窃取攻击模块
-- [ ] Web Dashboard（审计可视化）
-- [ ] 基准评测：多模型 × 多攻击的成功率矩阵
+- [x] v0.3：工具投毒、数据窃取、记忆污染、资源滥用攻击模块；完整性校验/调用预算防护；Web 审计看板；基准评测矩阵；HTTP 黑盒靶场；Docker 部署
+- [ ] 多模型基准（--llm openai-compat 跑多模型对比）
+- [ ] 真实 Agent 框架适配（LangChain / 自建 Agent 的 Trace 采集）
 
 ## License
 

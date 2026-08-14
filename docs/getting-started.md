@@ -75,6 +75,42 @@ agent-shield attack --llm openai-compat --model qwen2.5:7b \
     --base-url http://localhost:11434/v1 -n 5
 ```
 
+## 基准评测（一键矩阵）
+
+```bash
+agent-shield benchmark                 # 7 个攻击向量 × 加固前后成功率
+agent-shield benchmark --markdown bench.md --json bench.json
+agent-shield benchmark --llm openai-compat --model deepseek-chat   # 真实模型
+```
+
+## Web 审计看板
+
+```bash
+# 先让代理/运行时产生审计事件（SQLite）
+agent-shield proxy --port 8090 --mock-upstream --db proxy_audit.db
+# 再开看板
+agent-shield dashboard --db proxy_audit.db --port 8085
+# 浏览器打开 http://127.0.0.1:8085（自动刷新 5s）
+```
+
+## HTTP 黑盒靶场（远程测试）
+
+```bash
+agent-shield http-agent --port 8000 --defense      # 起一个 HTTP 智能体服务
+# 另一端用 HttpAgentTarget 黑盒测试（无法注入工具内容，走任务型攻击）：
+```
+
+```python
+import httpx
+from agent_shield.attacks import AttackConfig, DirectInjectionAttack
+from agent_shield.targets import HttpAgentTarget
+
+target = HttpAgentTarget("http://127.0.0.1:8000")
+result = await DirectInjectionAttack().run(target, AttackConfig(num_variants=3))
+```
+
+Docker 一键起靶场 + 看板：`docker compose up --build`（见 docker-compose.yml）。
+
 ## 自定义策略
 
 策略引擎支持 YAML 覆写默认策略（默认失败关闭）：

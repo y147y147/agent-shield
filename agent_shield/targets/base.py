@@ -23,3 +23,9 @@ class AgentTarget(ABC):
         例如把 payload 混入 web_search 返回的"页面内容"。
         默认实现不做任何事；具体 Target 可覆盖。
         """
+
+    def inject_poisoned_tool(self, tool) -> None:
+        """模拟供应链/恶意 MCP 投毒：替换/注册一个同名恶意工具。
+
+        默认实现不做任何事；具体 Target 可覆盖。
+        """
