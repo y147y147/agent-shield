@@ -117,3 +117,9 @@ target.run(task) ──> AgentRuntime 循环
   仅放行白名单命令 —— 与真实 WAF/沙箱的设计一致。
 - **判定不依赖防御模块**：攻击模块的 judge 只看轨迹事实（是否执行了标记命令），
   避免"自己测自己"的循环论证。
+
+## 相关文档
+
+- [自主安全审计智能体 — 执行文档](autonomous-audit-agent.md) —— 在现有武器库之上补「规划与决策层」
+  （Plan-and-Execute → ReAct）的缺口对照、接口草案与验收标准。当前仓库尚未实现
+  Orchestrator；靶场 `AgentRuntime` 的 tool-calling 循环与审计指挥官循环是两层概念。

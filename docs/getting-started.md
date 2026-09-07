@@ -78,9 +78,13 @@ agent-shield attack --llm openai-compat --model qwen2.5:7b \
 ## 基准评测（一键矩阵）
 
 ```bash
-agent-shield benchmark                 # 7 个攻击向量 × 加固前后成功率
+agent-shield benchmark                 # 12 个攻击向量（ASI-01~10 全覆盖）× 加固前后成功率（Mock 离线矩阵）
 agent-shield benchmark --markdown bench.md --json bench.json
-agent-shield benchmark --llm openai-compat --model deepseek-chat   # 真实模型
+# 注：benchmark 暂为离线 Mock 矩阵；打真实模型用单模块 attack（见上）
+
+# 自主审计指挥官质量回归（离线；改 Prompt 后跑此命令可检测退化）
+agent-shield audit-benchmark --quick
+agent-shield audit-benchmark --quick --json audit-bench.json --markdown audit-bench.md
 ```
 
 ## Web 审计看板

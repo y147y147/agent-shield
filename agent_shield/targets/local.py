@@ -56,6 +56,8 @@ def build_local_target(
     tools: ToolRegistry | None = None,
     judge_llm: LLMClient | None = None,
     audit_store=None,
+    sandbox: bool = False,
+    event_sink=None,
 ) -> LocalAgentTarget:
     """构建 Demo 靶场目标。
 
@@ -63,7 +65,9 @@ def build_local_target(
     - llm="openai-compat"：真实模型，需提供 model（可用环境变量 OPENAI_API_KEY / OPENAI_BASE_URL）。
     - defense=True：挂载注入检测器（规则）+ 失败关闭的策略引擎 + 工具完整性校验 + 调用预算；
     - judge_llm：额外挂载 LLM-as-Judge 慢路径检测器（与规则检测互补）；
-    - audit_store：可选，每次工具调用写入审计日志。
+    - audit_store：可选，每次工具调用写入审计日志；
+    - sandbox=True（或 defense=True）：run_command 在沙箱中执行（资源限制 + 超时 + 固定工作目录）；
+    - event_sink：可选，实时过程链事件回调（用户输入/模型决策/工具调用/输出/拦截/最终答复）。
     """
     llm_client = _build_llm(llm, model=model, api_key=api_key, base_url=base_url)
     registry = tools or build_default_tools()
@@ -76,7 +80,14 @@ def build_local_target(
         guardrails.append(ToolIntegrityGuard(registry))
         if judge_llm is not None:
             guardrails.append(LLMJudgeDetector(judge_llm))
-    runtime = AgentRuntime(llm=llm_client, tools=registry, guardrails=guardrails, audit_store=audit_store)
+    if sandbox or defense:
+        # 沙箱执行：命令在受限环境运行（ASI-05/ASI-08 对策）
+        cmd_tool = registry.get("run_command")
+        if hasattr(cmd_tool, "sandbox"):
+            cmd_tool.sandbox = True
+    runtime = AgentRuntime(
+        llm=llm_client, tools=registry, guardrails=guardrails, audit_store=audit_store, event_sink=event_sink
+    )
     mode = "defended" if defense else "vulnerable"
     return LocalAgentTarget(runtime, name=f"vulnerable-office-agent[{mode}]", description=f"Demo 靶场（{mode}，llm={llm_client.name}）")
 

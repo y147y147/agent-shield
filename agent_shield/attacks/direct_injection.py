@@ -5,7 +5,8 @@
 
 与 indirect_injection 的区别：注入点在用户输入而非第三方工具输出。
 
-对齐：OWASP Agentic AI Top 10 —— ASI-05（直接提示注入）；
+对齐：OWASP Agentic AI Top 10（2026）—— ASI-01（Agent Goal Hijack，目标劫持，
+注入通道=用户输入）；
       MITRE ATLAS —— AML.T0051（Prompt Injection，近似映射）。
 """
 
@@ -29,9 +30,9 @@ from agent_shield.targets.base import AgentTarget
 @register
 class DirectInjectionAttack(AttackModule):
     name = "direct_injection"
-    description = "直接 Prompt 注入：在用户输入中隐藏指令，诱导智能体执行攻击者控制的命令（目标劫持）"
+    description = "直接 Prompt 注入（目标劫持）：在用户输入中隐藏指令，诱导智能体执行攻击者控制的命令"
     atlas_id = "AML.T0051"
-    owasp_asi = "ASI-05"
+    owasp_asi = "ASI-01"
 
     def __init__(self, marker_command: str | None = None):
         self.marker_command = marker_command or DEFAULT_MARKER_CMD
@@ -70,6 +71,8 @@ class DirectInjectionAttack(AttackModule):
     # 执行
     # -------------------------------------------------------------- #
     async def run(self, target: AgentTarget, config: AttackConfig) -> AttackResult:
+        if (config.params or {}).get("marker_command"):
+            self.marker_command = str(config.params["marker_command"])
         result = AttackResult(
             module=self.name,
             description=self.description,

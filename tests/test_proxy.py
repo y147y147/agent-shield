@@ -41,7 +41,11 @@ def test_sanitize_mode_cleans_and_audits():
     events = client.get("/audit/latest").json()["events"]
     assert len(events) == 1
     assert events[0]["action"] == "mock"
-    assert "指令块标记" in events[0]["detections"]
+    dets = events[0]["detections"]
+    if isinstance(dets, list):
+        assert any(d.get("signal") == "指令块标记" for d in dets)
+    else:
+        assert "指令块标记" in dets
 
 
 def test_audit_mode_records_but_does_not_modify():

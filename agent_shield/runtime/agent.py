@@ -32,6 +32,7 @@ class AgentRuntime:
         max_steps: int = 8,
         system_prompt: str = SYSTEM_PROMPT,
         audit_store=None,
+        event_sink=None,
     ):
         self.llm = llm
         self.tools = tools
@@ -39,6 +40,11 @@ class AgentRuntime:
         self.max_steps = max_steps
         self.system_prompt = system_prompt
         self.audit_store = audit_store  # 可选：每次工具调用写入审计日志
+        self.event_sink = event_sink  # 可选：实时过程链事件（type/text/tool/args/reason...）
+
+    def _emit(self, event: dict) -> None:
+        if self.event_sink is not None:
+            self.event_sink(event)
 
     async def run(self, task: str) -> AgentTrace:
         # 用户输入先经过防护层清洗（直接注入防御）
@@ -52,21 +58,32 @@ class AgentRuntime:
         messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]
         trace = AgentTrace(task=task)
         started = time.perf_counter()
+        self._emit({"type": "user", "text": task})
 
         try:
             for _ in range(self.max_steps):
                 resp = await self.llm.chat(messages, self.tools.all())
                 step = TraceStep(messages=list(messages))
 
+                # 过程链：模型思考/决策 + 文本回复
+                reasoning = resp.reasoning or getattr(self.llm, "last_decision", "") or None
+                if reasoning:
+                    self._emit({"type": "think", "text": reasoning})
+                if resp.content:
+                    self._emit({"type": "llm", "text": resp.content})
+
                 if not resp.tool_calls:
                     step.final_answer = resp.content or ""
                     trace.steps.append(step)
                     trace.final_answer = resp.content
+                    self._emit({"type": "final", "text": resp.content or ""})
                     break
 
                 # 1) 回传 assistant 消息（含 tool_calls，OpenAI 协议要求）
                 step.tool_calls = resp.tool_calls
                 messages.append(ChatMessage.assistant(resp.content, resp.tool_calls))
+                for call in resp.tool_calls:
+                    self._emit({"type": "call", "tool": call.name, "args": call.arguments})
 
                 # 2) 逐个执行工具调用（经过防护层）
                 for call in resp.tool_calls:
@@ -82,10 +99,12 @@ class AgentRuntime:
                         )
                         output = f"[blocked by AgentShield] {decision.reason}"
                         self._audit("blocked", call, decision.reason)
+                        self._emit({"type": "blocked", "tool": call.name, "reason": decision.reason})
                     else:
                         output = await self.tools.execute(call.name, call.arguments)
                         output = await self._sanitize_tool_output(call, output)
                         self._audit("executed", call, "")
+                        self._emit({"type": "output", "tool": call.name, "text": output})
                     step.tool_outputs.append(ChatMessage.tool(output, call.id, call.name))
                     messages.append(ChatMessage.tool(output, call.id, call.name))
 
@@ -93,8 +112,10 @@ class AgentRuntime:
             else:
                 # 达到最大步数仍未结束
                 trace.final_answer = trace.final_answer or "(agent reached max steps)"
+                self._emit({"type": "final", "text": trace.final_answer})
         except Exception as exc:  # noqa: BLE001 —— 保持轨迹完整，便于审计
             trace.final_answer = f"(agent error: {exc})"
+            self._emit({"type": "error", "text": trace.final_answer})
 
         trace.duration_ms = int((time.perf_counter() - started) * 1000)
         return trace

@@ -58,13 +58,42 @@ class AuditStore:
             self._conn.commit()
 
     def latest(self, n: int = 20) -> list[dict]:
+        return self.list_events(limit=n)
+
+    def list_events(self, *, limit: int = 100, since_ts: float | None = None) -> list[dict]:
+        """按时间倒序返回审计事件（可选 since_ts 下限）。"""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, ts, direction, model, action, detections, detail FROM audit_events ORDER BY ts DESC LIMIT ?",
-                (n,),
-            ).fetchall()
+            if since_ts is not None:
+                rows = self._conn.execute(
+                    """
+                    SELECT id, ts, direction, model, action, detections, detail
+                    FROM audit_events
+                    WHERE ts >= ?
+                    ORDER BY ts DESC
+                    LIMIT ?
+                    """,
+                    (since_ts, max(1, limit)),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT id, ts, direction, model, action, detections, detail
+                    FROM audit_events
+                    ORDER BY ts DESC
+                    LIMIT ?
+                    """,
+                    (max(1, limit),),
+                ).fetchall()
         cols = ["id", "ts", "direction", "model", "action", "detections", "detail"]
-        return [dict(zip(cols, r)) for r in rows]
+        out: list[dict] = []
+        for row in rows:
+            item = dict(zip(cols, row))
+            try:
+                item["detections"] = json.loads(item["detections"] or "[]")
+            except json.JSONDecodeError:
+                item["detections"] = []
+            out.append(item)
+        return out
 
     def count(self) -> int:
         with self._lock:

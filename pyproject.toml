@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-shield"
-version = "0.1.0"
+version = "0.4.0"
 description = "Open-source red-team & runtime-guard framework for LLM agents (智能体安全攻防框架)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "y147y147", email = "149349288+y147y147@users.noreply.github.com" }]
 keywords = ["llm", "agent", "security", "prompt-injection", "red-team", "guardrails"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -47,6 +47,9 @@ packages = ["agent_shield"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: tests requiring real LLM API (set AUDIT_LLM_MODEL or OPENAI_MODEL)",
+]
 
 [tool.ruff]
 line-length = 100

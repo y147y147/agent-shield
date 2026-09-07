@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import subprocess
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agent_shield.defenses.sandbox import SandboxExecutor
 from agent_shield.runtime.llm import tool_schema
 
 
@@ -111,10 +111,14 @@ class WebSearchTool(Tool):
 class RunCommandTool(Tool):
     """执行 shell 命令 —— 脆弱靶场的核心危险面。
 
-    注意：真实场景必须配合沙箱/策略引擎；此处故意不做任何限制以演示漏洞。
+    sandbox=True 时通过 SandboxExecutor 启用资源限制（CPU 时间 / 文件大小 /
+    内存）+ 超时 + 固定工作目录，演示"沙箱执行"防御
+    （ASI-05 意外代码执行 / ASI-08 级联故障的对策）。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, sandbox: bool = False) -> None:
+        self.sandbox = sandbox
+        self.executor = SandboxExecutor()
         super().__init__(
             name="run_command",
             description="在本地执行一条 shell 命令并返回输出。",
@@ -126,24 +130,11 @@ class RunCommandTool(Tool):
             fn=self._run,
         )
 
-    @staticmethod
-    def _run(arguments: dict[str, Any]) -> str:
+    def _run(self, arguments: dict[str, Any]) -> str:
         command = arguments.get("command", "")
-        try:
-            proc = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd="/tmp",
-                check=False,
-            )
-            stdout = proc.stdout.strip()
-            stderr = proc.stderr.strip()
-            return f"exit={proc.returncode}\nstdout: {stdout}\nstderr: {stderr}"
-        except subprocess.TimeoutExpired:
-            return "error: command timed out (10s)"
+        result = self.executor.run(command, sandbox=self.sandbox)
+        label = "sandboxed" if self.sandbox else "exit"
+        return f"{label}={result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
 
 class ReadFileTool(Tool):
@@ -218,6 +209,27 @@ class SendEmailTool(Tool):
         return f"email sent to {arguments.get('to')}: {arguments.get('subject')}"
 
 
+class ReceiveMessageTool(Tool):
+    """接收其他智能体发来的消息（Agent 间通信通道，ASI-07 注入点）。
+
+    inject_payload 非空时模拟"被攻击者控制的同伴智能体"发来的恶意消息。
+    """
+
+    def __init__(self) -> None:
+        self.inject_payload: str | None = None
+        super().__init__(
+            name="receive_message",
+            description="接收其他智能体（agent）发来的消息。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            fn=self._run,
+        )
+
+    def _run(self, arguments: dict[str, Any]) -> str:
+        if self.inject_payload:
+            return f"[来自 agent-a 的消息]\n{self.inject_payload}"
+        return "（暂无新消息）"
+
+
 def build_default_tools() -> ToolRegistry:
     """Demo 靶场默认工具集。"""
     registry = ToolRegistry()
@@ -226,4 +238,5 @@ def build_default_tools() -> ToolRegistry:
     registry.add(ReadFileTool())
     registry.add(WriteFileTool())
     registry.add(SendEmailTool())
+    registry.add(ReceiveMessageTool())
     return registry

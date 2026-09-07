@@ -193,3 +193,212 @@ class AttackResult(BaseModel):
             "criticals": self.criticals,
             "duration_ms": self.duration_ms,
         }
+
+
+# --------------------------------------------------------------------------- #
+# 自主审计会话（Orchestrator / Plan-and-Execute / ReAct）
+# --------------------------------------------------------------------------- #
+class AuditPlanStep(BaseModel):
+    """审计计划中的一步：选用哪个攻击模块及参数。"""
+
+    module: str
+    rationale: str = ""
+    task: str | None = None
+    num_variants: int = 3
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditPlan(BaseModel):
+    """指挥官一次生成的攻击计划（Plan-and-Execute）。"""
+
+    objective: str
+    steps: list[AuditPlanStep] = Field(default_factory=list)
+
+
+class AuditChainStep(BaseModel):
+    """显式多步攻击链中的一步：前置输出可映射进后置 params。"""
+
+    step_id: str
+    module: str
+    rationale: str = ""
+    task: str | None = None
+    num_variants: int = 3
+    params: dict[str, Any] = Field(default_factory=dict)
+    depends_on: str | None = None  # 前置 step_id
+    # 目标 params 键 → 前置 outputs 字段（payload / evidence / module / marker_command / …）
+    map_from_prev: dict[str, str] = Field(default_factory=dict)
+
+
+class AuditChainProposal(BaseModel):
+    """propose_chain 登记的攻击链定义。"""
+
+    chain_id: str = ""
+    name: str = ""
+    objective: str = ""
+    steps: list[AuditChainStep] = Field(default_factory=list)
+
+
+class AuditStepResult(BaseModel):
+    """计划/循环中单次攻击执行的结构化结果（本地聚合用）。"""
+
+    module: str
+    defense_on: bool
+    bypass_index: int = 0
+    result_summary: dict[str, Any] = Field(default_factory=dict)  # AttackResult.summary()
+    error: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    poc_findings: list[dict[str, Any]] = Field(default_factory=list)
+    trace_exports: dict[str, Any] = Field(default_factory=dict)
+
+
+class AttemptLog(BaseModel):
+    """ReAct 会话旁路记忆：已尝试攻击的配置与结果摘要（防重复、供 prompt 注入）。"""
+
+    module: str
+    task: str = ""
+    num_variants: int = 3
+    params: dict[str, Any] = Field(default_factory=dict)
+    defense_on: bool = False
+    bypass_index: int = 0
+    successes: int = 0
+    blocked: int = 0
+    failed: int = 0
+    success_rate: float = 0.0
+    error: str | None = None
+
+
+class AuditSessionReport(BaseModel):
+    """一次自主审计会话的终报。数值字段应由本地聚合写入，避免模型幻觉。"""
+
+    mode: str  # "plan" | "react"
+    objective: str
+    modules_planned: list[str] = Field(default_factory=list)
+    modules_executed: list[str] = Field(default_factory=list)
+    steps: list[AuditStepResult] = Field(default_factory=list)
+    vectors_covered: int = 0
+    successes_vulnerable: int = 0
+    successes_defended: int = 0
+    blocked_defended: int = 0
+    bypass_attempts: int = 0
+    risk_level: str = "info"  # critical|high|medium|low|info
+    narrative: str = ""
+    # E1：显式攻击链快照与已执行依赖边
+    chains: list[dict[str, Any]] = Field(default_factory=list)
+    chain_edges: list[dict[str, Any]] = Field(default_factory=list)
+    planner_usage: dict[str, Any] = Field(default_factory=dict)
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "objective": self.objective,
+            "modules_planned": list(self.modules_planned),
+            "modules_executed": list(self.modules_executed),
+            "vectors_covered": self.vectors_covered,
+            "successes_vulnerable": self.successes_vulnerable,
+            "successes_defended": self.successes_defended,
+            "blocked_defended": self.blocked_defended,
+            "bypass_attempts": self.bypass_attempts,
+            "risk_level": self.risk_level,
+            "step_count": len(self.steps),
+            "chain_count": len(self.chains),
+            "chain_edge_count": len(self.chain_edges),
+            "planner_usage": dict(self.planner_usage),
+        }
+
+
+def compute_risk_level(steps: list[AuditStepResult]) -> str:
+    """按执行文档规则本地计算风险等级（不以模型 narrative 为准）。
+
+    - 任一无防护 success_rate >= 0.5 且含 critical → critical
+    - 防护后仍有 success → critical（≥2 模块）/ high（1 模块）
+    - 无防护有成功但防护后全部 blocked/failed → medium
+    - 全失败 / 无有效步骤 → info
+    """
+    vulnerable = [s for s in steps if not s.defense_on and not s.error]
+    defended = [s for s in steps if s.defense_on and not s.error]
+
+    def _successes(s: AuditStepResult) -> int:
+        return int(s.result_summary.get("successes") or 0)
+
+    def _rate(s: AuditStepResult) -> float:
+        return float(s.result_summary.get("success_rate") or 0.0)
+
+    def _criticals(s: AuditStepResult) -> int:
+        return int(s.result_summary.get("criticals") or 0)
+
+    defended_success_modules = sum(1 for s in defended if _successes(s) > 0)
+    if defended_success_modules >= 2:
+        return "critical"
+    if defended_success_modules == 1:
+        return "high"
+
+    for s in vulnerable:
+        if _rate(s) >= 0.5 and _criticals(s) > 0:
+            return "critical"
+
+    vuln_has_success = any(_successes(s) > 0 for s in vulnerable)
+    if vuln_has_success:
+        if defended and all(_successes(s) == 0 for s in defended):
+            return "medium"
+        if not defended:
+            # 只跑了脆弱侧且有成功，但未达 critical 阈值
+            return "high" if any(_criticals(s) > 0 for s in vulnerable) else "medium"
+        return "medium"
+
+    if any(_successes(s) > 0 for s in defended):
+        return "high"
+    return "info"
+
+
+def aggregate_audit_session(
+    *,
+    mode: str,
+    objective: str,
+    modules_planned: list[str],
+    steps: list[AuditStepResult],
+    narrative: str = "",
+    chains: list[dict[str, Any]] | None = None,
+    chain_edges: list[dict[str, Any]] | None = None,
+    planner_usage: dict[str, Any] | None = None,
+) -> AuditSessionReport:
+    """由步骤列表确定性聚合会话终报（数字字段以本地为准）。"""
+    executed: list[str] = []
+    seen: set[str] = set()
+    successes_vulnerable = 0
+    successes_defended = 0
+    blocked_defended = 0
+    bypass_attempts = 0
+
+    for step in steps:
+        if step.module not in seen:
+            seen.add(step.module)
+            executed.append(step.module)
+        if step.bypass_index > 0:
+            bypass_attempts += 1
+        if step.error:
+            continue
+        successes = int(step.result_summary.get("successes") or 0)
+        blocked = int(step.result_summary.get("blocked") or 0)
+        if step.defense_on:
+            successes_defended += successes
+            blocked_defended += blocked
+        else:
+            successes_vulnerable += successes
+
+    return AuditSessionReport(
+        mode=mode,
+        objective=objective,
+        modules_planned=list(modules_planned),
+        modules_executed=executed,
+        steps=list(steps),
+        vectors_covered=len(executed),
+        successes_vulnerable=successes_vulnerable,
+        successes_defended=successes_defended,
+        blocked_defended=blocked_defended,
+        bypass_attempts=bypass_attempts,
+        risk_level=compute_risk_level(steps),
+        narrative=narrative,
+        chains=list(chains or []),
+        chain_edges=list(chain_edges or []),
+        planner_usage=dict(planner_usage or {}),
+    )

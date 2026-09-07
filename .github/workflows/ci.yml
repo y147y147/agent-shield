@@ -20,5 +20,7 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Lint
         run: ruff check .
+      - name: Audit benchmark (quick)
+        run: agent-shield audit-benchmark --quick
       - name: Test
         run: pytest -q

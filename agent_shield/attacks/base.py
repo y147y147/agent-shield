@@ -25,6 +25,9 @@ class AttackModule(ABC):
     description: str = ""
     atlas_id: str | None = None
     owasp_asi: str | None = None
+    # 需要控制智能体内部状态才能模拟的攻击（如 ASI-10 内部失控）：
+    # 对黑盒真实 API 模型不可测，仅在本地 Mock 靶场生效。
+    mock_only: bool = False
 
     @abstractmethod
     async def run(self, target: AgentTarget, config: AttackConfig) -> AttackResult:
