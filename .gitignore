@@ -14,6 +14,7 @@ venv/
 .mypy_cache/
 .coverage
 htmlcov/
+.basetmp/
 
 # OS
 .DS_Store
@@ -21,3 +22,8 @@ htmlcov/
 # Local
 *.local.yaml
 .env
+
+# Runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
