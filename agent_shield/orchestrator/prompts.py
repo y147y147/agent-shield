@@ -163,7 +163,7 @@ def extract_json_object(text: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"规划器 JSON 解析失败: {exc}") from exc
     if not isinstance(data, dict):
-        raise ValueError("AuditPlan 必须是 JSON 对象")
+        raise TypeError("AuditPlan 必须是 JSON 对象")
     return data
 
 

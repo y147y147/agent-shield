@@ -20,8 +20,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from agent_shield import __version__
 from agent_shield.models import AttackResult, AttackVerdict, Severity

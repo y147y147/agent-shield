@@ -15,6 +15,7 @@ from agent_shield.models import (
     ChatMessage,
     aggregate_audit_session,
 )
+from agent_shield.observability import get_logger
 from agent_shield.orchestrator.prompts import (
     build_plan_system_prompt,
     build_plan_user_message,
@@ -23,6 +24,8 @@ from agent_shield.orchestrator.prompts import (
 from agent_shield.orchestrator.tools_bridge import execute_attack_tool
 from agent_shield.runtime.llm import LLMClient, LLMResponse
 from agent_shield.targets.base import AgentTarget
+
+logger = get_logger("orchestrator.plan_execute")
 
 TargetFactory = Callable[..., AgentTarget]
 EventSink = Callable[[dict[str, Any]], None]
@@ -62,8 +65,8 @@ def _emit(on_event: EventSink | None, event: dict[str, Any]) -> None:
         return
     try:
         on_event(event)
-    except Exception:  # noqa: BLE001 — 进度回调失败不影响审计
-        pass
+    except Exception:
+        logger.debug("event sink 回调失败（已忽略）", exc_info=True)
 
 
 def _known_module(name: str) -> bool:

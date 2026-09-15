@@ -8,7 +8,14 @@ from collections.abc import Callable
 from typing import Any
 
 from agent_shield.attacks import get_attack_module
-from agent_shield.models import AuditSessionReport, AuditStepResult, ChatMessage, ToolCall, aggregate_audit_session
+from agent_shield.models import (
+    AuditSessionReport,
+    AuditStepResult,
+    ChatMessage,
+    ToolCall,
+    aggregate_audit_session,
+)
+from agent_shield.observability import get_logger
 from agent_shield.orchestrator.memory import SessionMemory
 from agent_shield.orchestrator.plan_execute import _observation_to_step_result
 from agent_shield.orchestrator.prompts import build_react_system_prompt, build_react_user_message
@@ -25,6 +32,8 @@ from agent_shield.orchestrator.tools_bridge import (
 from agent_shield.runtime.llm import LLMClient, LLMResponse
 from agent_shield.targets.base import AgentTarget
 
+logger = get_logger("orchestrator.react_loop")
+
 TargetFactory = Callable[..., AgentTarget]
 EventSink = Callable[[dict[str, Any]], None]
 
@@ -34,8 +43,8 @@ def _emit(on_event: EventSink | None, event: dict[str, Any]) -> None:
         return
     try:
         on_event(event)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception:
+        logger.debug("event sink 回调失败（已忽略）", exc_info=True)
 
 
 def _is_attack_tool(name: str) -> bool:

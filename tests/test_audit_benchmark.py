@@ -9,12 +9,12 @@ from typer.testing import CliRunner
 
 from agent_shield.cli import app as cli_app
 from agent_shield.core.audit_benchmark import (
+    TARGET_CONFIGS,
     AuditBenchMetrics,
     AuditBenchThresholds,
     evaluate_metrics,
-    run_audit_benchmark,
     run_audit_bench_case,
-    TARGET_CONFIGS,
+    run_audit_benchmark,
 )
 from agent_shield.models import AuditPlan, AuditPlanStep
 from agent_shield.orchestrator.plan_execute import FixedPlanLLM

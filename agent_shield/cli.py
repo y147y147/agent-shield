@@ -34,8 +34,8 @@ from rich.table import Table
 
 from agent_shield.attacks import AttackConfig, get_attack_module, list_attack_modules
 from agent_shield.core.report import result_to_json, result_to_markdown
-from agent_shield.runtime.llm import OpenAICompatLLM
 from agent_shield.observability import configure_logging
+from agent_shield.runtime.llm import OpenAICompatLLM
 from agent_shield.targets import DEFAULT_TASK, build_local_target
 
 app = typer.Typer(help="AgentShield — LLM 智能体安全攻防框架", add_completion=False)
@@ -225,7 +225,11 @@ def audit(
         session_report_to_markdown,
     )
     from agent_shield.orchestrator.session_store import AuditSessionStore
-    from agent_shield.orchestrator.target_factory import AuditTargetSpec, build_audit_target_factory, resolve_audit_options
+    from agent_shield.orchestrator.target_factory import (
+        AuditTargetSpec,
+        build_audit_target_factory,
+        resolve_audit_options,
+    )
     from agent_shield.paths import default_session_db_path
     from agent_shield.proxy.audit import AuditStore
     from agent_shield.runtime.llm import OpenAICompatLLM
@@ -472,7 +476,11 @@ def benchmark(
     md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 矩阵"),
 ) -> None:
     """基准评测：全部攻击模块 × 加固前后成功率矩阵（含置信区间）。"""
-    from agent_shield.core.benchmark import format_matrix_rate, matrix_to_markdown, run_benchmark_matrix
+    from agent_shield.core.benchmark import (
+        format_matrix_rate,
+        matrix_to_markdown,
+        run_benchmark_matrix,
+    )
 
     matrix = asyncio.run(run_benchmark_matrix(llm=llm, num_variants=variants, runs=runs))
 
@@ -495,7 +503,7 @@ def benchmark(
     console.print(table)
     if runs > 1:
         console.print(
-            f"[dim]置信区间为 Wilson score interval（{int(round(matrix[0]['confidence'] * 100)) if matrix else 95}%）。"
+            f"[dim]置信区间为 Wilson score interval（{round(matrix[0]['confidence'] * 100) if matrix else 95}%）。"
             f"单轮 100%/0% 不等于「必然/绝不可能」，多轮运行可给出误差范围。[/]"
         )
 
@@ -640,7 +648,11 @@ def audit_schedule_cmd(
     from agent_shield.orchestrator.plan_execute import FixedPlanLLM, audit_plan_and_execute
     from agent_shield.orchestrator.react_loop import DefaultReActLLM, audit_agent_loop
     from agent_shield.orchestrator.session_store import AuditSessionStore
-    from agent_shield.orchestrator.target_factory import AuditTargetSpec, build_audit_target_factory, resolve_audit_options
+    from agent_shield.orchestrator.target_factory import (
+        AuditTargetSpec,
+        build_audit_target_factory,
+        resolve_audit_options,
+    )
     from agent_shield.paths import default_session_db_path
     from agent_shield.targets import DEFAULT_TASK
 

@@ -120,7 +120,7 @@ def format_matrix_rate(row: dict[str, Any], prefix: str) -> str:
     rate = row[f"{prefix}_success_rate"]
     ci_low = row.get(f"{prefix}_ci_low", 0.0)
     ci_high = row.get(f"{prefix}_ci_high", 0.0)
-    conf = int(round(row.get("confidence", DEFAULT_CONFIDENCE) * 100))
+    conf = round(row.get("confidence", DEFAULT_CONFIDENCE) * 100)
     return f"{rate:.0%} ({conf}% CI {ci_low:.0%}–{ci_high:.0%})"
 
 
@@ -131,7 +131,7 @@ def matrix_to_markdown(matrix: list[dict[str, Any]]) -> str:
         "# AgentShield 基准评测（Benchmark）",
         "",
         f"- 每个模块：{runs} 轮 × {variants} 个载荷变体（共 {runs * variants} 个用例）",
-        f"- 置信区间：Wilson score interval（{int(round((matrix[0].get('confidence', DEFAULT_CONFIDENCE) if matrix else DEFAULT_CONFIDENCE) * 100))}% 置信）",
+        f"- 置信区间：Wilson score interval（{round((matrix[0].get('confidence', DEFAULT_CONFIDENCE) if matrix else DEFAULT_CONFIDENCE) * 100)}% 置信）",
         "",
         "| 攻击模块 | OWASP ASI | MITRE ATLAS | 加固前成功率 | 加固后成功率 |",
         "| --- | --- | --- | --- | --- |",

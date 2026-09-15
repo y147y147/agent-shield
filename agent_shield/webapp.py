@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -28,6 +28,9 @@ from agent_shield.defenses import PolicyEngine, SandboxExecutor
 from agent_shield.models import AgentTrace, AttackResult
 from agent_shield.observability import render_metrics
 from agent_shield.targets import DEFAULT_TASK, build_local_target
+
+if TYPE_CHECKING:  # 仅类型检查期导入：避免运行时把 orchestrator 拉进 webapp 的导入链
+    from agent_shield.orchestrator.target_factory import AuditTargetSpec
 
 WORKBENCH_HTML = """<!doctype html>
 <html lang="zh">
@@ -1025,7 +1028,7 @@ async def _resolve_audit_planner(req: AutoAuditRequest, store=None):
     raise ValueError(f"未知 llm: {req.llm}")
 
 
-def _audit_target_spec_from_request(req: AutoAuditRequest, store) -> "AuditTargetSpec":  # noqa: F821
+def _audit_target_spec_from_request(req: AutoAuditRequest, store) -> AuditTargetSpec:
     from agent_shield.orchestrator.target_factory import AuditTargetSpec
 
     if req.target_kind not in {"local", "http", "mcp"}:
@@ -1060,7 +1063,10 @@ def _save_audit_session(session_store, report, req: AutoAuditRequest, store) -> 
 async def _run_auto_audit_core(req: AutoAuditRequest, store, on_event=None):
     from agent_shield.orchestrator.plan_execute import audit_plan_and_execute
     from agent_shield.orchestrator.react_loop import audit_agent_loop
-    from agent_shield.orchestrator.target_factory import build_audit_target_factory, resolve_audit_options
+    from agent_shield.orchestrator.target_factory import (
+        build_audit_target_factory,
+        resolve_audit_options,
+    )
 
     target_spec = _audit_target_spec_from_request(req, store)
     planner = await _resolve_audit_planner(req, store)

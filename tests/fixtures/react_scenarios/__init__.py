@@ -6,4 +6,4 @@ from tests.fixtures.react_scenarios.scenarios import (
     get_scenario,
 )
 
-__all__ = ["ReactScenario", "SCENARIOS", "get_scenario"]
+__all__ = ["SCENARIOS", "ReactScenario", "get_scenario"]

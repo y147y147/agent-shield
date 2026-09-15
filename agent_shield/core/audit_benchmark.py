@@ -9,7 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agent_shield.models import AuditSessionReport
-from agent_shield.orchestrator.plan_execute import DEFAULT_FIXED_PLAN, FixedPlanLLM, audit_plan_and_execute
+from agent_shield.orchestrator.plan_execute import (
+    DEFAULT_FIXED_PLAN,
+    FixedPlanLLM,
+    audit_plan_and_execute,
+)
 from agent_shield.orchestrator.react_loop import ScriptedReActLLM, audit_agent_loop
 from agent_shield.orchestrator.target_factory import AuditTargetSpec, build_audit_target_factory
 from agent_shield.orchestrator.tools_bridge import META_FINISH_AUDIT, META_LIST_COVERAGE

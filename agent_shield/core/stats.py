@@ -88,7 +88,7 @@ def rate_estimate(
 
 def format_rate(estimate: RateEstimate, *, digits: int = 0) -> str:
     """人类可读：``100% (95% CI 44%–100%)``。"""
-    ci = int(round(estimate.confidence * 100))
+    ci = round(estimate.confidence * 100)
     return (
         f"{estimate.rate:.{digits}%} "
         f"({ci}% CI {estimate.ci_low:.{digits}%}–{estimate.ci_high:.{digits}%})"

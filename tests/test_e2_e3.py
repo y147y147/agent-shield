@@ -7,8 +7,13 @@ import pytest
 
 from agent_shield.attacks.mcp_poisoning import MCPPoisoningAttack
 from agent_shield.core.audit_schedule import cron_matches
-from agent_shield.orchestrator.hitl import DANGEROUS_ATTACK_MODULES, hitl_payload, is_module_confirmed, requires_hitl
-from agent_shield.orchestrator.plan_execute import audit_plan_and_execute, FixedPlanLLM
+from agent_shield.orchestrator.hitl import (
+    DANGEROUS_ATTACK_MODULES,
+    hitl_payload,
+    is_module_confirmed,
+    requires_hitl,
+)
+from agent_shield.orchestrator.plan_execute import FixedPlanLLM, audit_plan_and_execute
 from agent_shield.orchestrator.target_factory import AuditTargetSpec, build_audit_target_factory
 from agent_shield.orchestrator.tools_bridge import execute_attack_tool
 from agent_shield.orchestrator.usage import UsageAccumulator, UsageTrackingPlanner
@@ -55,10 +60,10 @@ async def test_audit_target_factory_mcp_kind():
 
 
 def test_cron_matches_top_of_hour():
-    from datetime import datetime
+    from datetime import UTC, datetime
 
-    assert cron_matches("0 2 * * *", datetime(2026, 8, 23, 2, 0))
-    assert not cron_matches("0 2 * * *", datetime(2026, 8, 23, 3, 0))
+    assert cron_matches("0 2 * * *", datetime(2026, 8, 23, 2, 0, tzinfo=UTC))
+    assert not cron_matches("0 2 * * *", datetime(2026, 8, 23, 3, 0, tzinfo=UTC))
 
 
 @pytest.mark.asyncio

@@ -6,8 +6,8 @@ from agent_shield.attacks.direct_injection import DirectInjectionAttack
 from agent_shield.attacks.human_trust_exploitation import HumanTrustExploitationAttack
 from agent_shield.attacks.indirect_injection import DEFAULT_MARKER_CMD, IndirectInjectionAttack
 from agent_shield.attacks.inter_agent_communication import InterAgentCommunicationAttack
+from agent_shield.attacks.mcp_poisoning import DEFAULT_MCP_TOOL, MCPPoisoningAttack
 from agent_shield.attacks.memory_poisoning import MemoryPoisoningAttack
-from agent_shield.attacks.mcp_poisoning import MCPPoisoningAttack, DEFAULT_MCP_TOOL
 from agent_shield.attacks.privilege_escalation import SENSITIVE_READ as PE_SENSITIVE_READ
 from agent_shield.attacks.privilege_escalation import PrivilegeEscalationAttack
 from agent_shield.attacks.registry import get_attack_module, list_attack_modules, register
@@ -30,8 +30,8 @@ __all__ = [
     "HumanTrustExploitationAttack",
     "IndirectInjectionAttack",
     "InterAgentCommunicationAttack",
-    "MemoryPoisoningAttack",
     "MCPPoisoningAttack",
+    "MemoryPoisoningAttack",
     "PrivilegeEscalationAttack",
     "ResourceAbuseAttack",
     "RogueAgentAttack",

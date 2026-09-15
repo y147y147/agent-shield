@@ -35,7 +35,9 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
-    "ruff>=0.5",
+    # 钉住小版本：ruff 会随版本扩张默认规则集，未固定时会突然让 CI 变红
+    # （2026-09 事故：CI 装到 0.16.7，默认规则新增 I/UP/DTZ 等 → 33 个报错）
+    "ruff>=0.16,<0.17",
 ]
 
 [project.scripts]
@@ -54,6 +56,25 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# 显式声明规则集：只依赖"我们验证过的规则"，不依赖 ruff 的默认集合。
+# 背景：ruff 升级会扩大默认规则集（0.14 → 0.16 新增 I / UP / DTZ 等），
+# 若不在配置里固定，CI 会在某次依赖升级后毫无征兆地变红。
+select = [
+    "E4",  # pycodestyle：import 相关
+    "E7",  # pycodestyle：语句级问题
+    "E9",  # pycodestyle：运行时错误（含语法级）
+    "F",   # Pyflakes：未使用导入/未定义名等
+    "I",   # isort：导入排序
+    "UP",  # pyupgrade：过时写法
+    "DTZ", # flake8-datetimez：naive datetime（必须显式时区）
+]
+ignore = [
+    # UP042 建议把 `class X(str, Enum)` 换成 `enum.StrEnum`；这会改变 `str(Enum)` 的
+    # 运行时返回值（"X.MEMBER" → "member"），属于公开语义变更，留待单独评估后再改。
+    "UP042",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Typer CLI 惯用写法：Option 调用在参数默认值中（B008 为此场景误报）

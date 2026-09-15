@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 
 def _parse_field(field: str, value: int, min_v: int, max_v: int) -> bool:
@@ -52,7 +53,7 @@ async def run_cron_loop(
     """每分钟检查 cron，匹配时执行 job（async 或 sync）。"""
     last_run_minute: str | None = None
     while True:
-        now = datetime.now()
+        now = datetime.now(UTC)
         if on_tick:
             on_tick(now)
         key = now.strftime("%Y-%m-%d %H:%M")
@@ -66,4 +67,4 @@ async def run_cron_loop(
 
 def run_cron_once(cron_expr: str, when: datetime | None = None) -> bool:
     """检查当前时刻是否匹配 cron（不执行 job）。"""
-    return cron_matches(cron_expr, when or datetime.now())
+    return cron_matches(cron_expr, when or datetime.now(UTC))

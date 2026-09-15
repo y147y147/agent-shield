@@ -27,7 +27,9 @@ uvicorn==0.38.0
 # ---- 开发/测试依赖 ----
 pytest==9.1.1
 pytest-asyncio==1.4.0
-ruff==0.14.4
+# ruff：CI 矩阵 job 会按 pyproject 的 "ruff>=0.16,<0.17" 安装；这里钉到已验证版本。
+# 注意：ruff 的新版本会扩大默认规则集，所以 pyproject 里已用 [tool.ruff.lint] select 固定规则集。
+ruff==0.16.7
 
 # ---- 关键间接依赖（钉住避免行为差异）----
 starlette==0.49.3

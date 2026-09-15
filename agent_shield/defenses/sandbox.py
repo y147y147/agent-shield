@@ -127,12 +127,12 @@ class SandboxExecutor:
             "text": True,
             "timeout": self.limits.timeout_seconds,
             "cwd": self.cwd,
-            "check": False,
         }
         if preexec_fn is not None:
             run_kwargs["preexec_fn"] = preexec_fn
         try:
-            proc = subprocess.run(command, **run_kwargs)
+            # check=False 显式传入：由调用方按 returncode 判定，不抛 CalledProcessError
+            proc = subprocess.run(command, check=False, **run_kwargs)
             SANDBOX_RUNS.inc(outcome="ok" if proc.returncode == 0 else "error")
             return SandboxResult(
                 returncode=proc.returncode,

@@ -8,8 +8,8 @@ import pytest
 
 from agent_shield.models import AuditChainStep
 from agent_shield.orchestrator.chain import (
-    ChainRuntime,
     DEFAULT_MAP_FROM_PREV,
+    ChainRuntime,
     extract_outputs_from_attack_payload,
     merge_params_from_prev,
     parse_chain_proposal,
