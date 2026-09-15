@@ -11,6 +11,7 @@
 
 from agent_shield.defenses import PolicyEngine
 from agent_shield.models import ToolCall
+from agent_shield.paths import demo_workdir
 
 
 def _call(name: str, **arguments) -> ToolCall:
@@ -109,10 +110,30 @@ async def test_non_allowlisted_command_denied():
         assert not decision.allowed, f"应拦截: {cmd}"
 
 
-async def test_unknown_tool_still_allowed_by_default():
+async def test_unknown_tool_denied_by_default():
+    """fail-closed：未覆盖的工具默认拒绝（v1.0-M0 起，此前为默认放行）。"""
     engine = PolicyEngine()
     decision = await engine.check_tool_call(_call("some_other_tool", x="1"))
-    assert decision.allowed
+    assert not decision.allowed
+    assert "fail-closed" in decision.reason
+
+
+# --------------------------------------------------------------------------- #
+# 跨平台路径：Windows 反斜杠不应导致合法命令被误拦
+# （该误报由良性对照集 tests/test_fp_benchmark.py 发现：shlex(posix=True) 会吃掉反斜杠）
+# --------------------------------------------------------------------------- #
+async def test_forward_slash_path_in_allowed_root_is_allowed():
+    workdir = str(demo_workdir()).replace("\\", "/")
+    engine = PolicyEngine()
+    decision = await engine.check_tool_call(_call("run_command", command=f"ls {workdir}"))
+    assert decision.allowed, decision.reason
+
+
+async def test_backslash_path_in_allowed_root_is_allowed():
+    workdir = str(demo_workdir())
+    engine = PolicyEngine()
+    decision = await engine.check_tool_call(_call("run_command", command=f"ls {workdir}"))
+    assert decision.allowed, decision.reason
 
 
 # --------------------------------------------------------------------------- #

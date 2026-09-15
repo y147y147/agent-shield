@@ -85,10 +85,12 @@ async def test_policy_denies_email_by_default():
     assert not decision.allowed
 
 
-async def test_policy_uncovered_tool_allowed():
+async def test_policy_uncovered_tool_denied_by_default():
+    """fail-closed：策略未覆盖的工具默认拒绝，不再"默认裸奔"。"""
     engine = PolicyEngine()
     decision = await engine.check_tool_call(ToolCall(id="c", name="some_new_tool", arguments={"a": "b"}))
-    assert decision.allowed
+    assert not decision.allowed
+    assert "fail-closed" in decision.reason
 
 
 # --------------------------------------------------------------------------- #
