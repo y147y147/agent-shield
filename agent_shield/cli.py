@@ -109,6 +109,14 @@ def attack(
     sandbox: bool = typer.Option(False, "--sandbox/--no-sandbox", help="run_command 在沙箱中执行（资源限制 + 超时）"),
     json_out: Path | None = typer.Option(None, "--json", help="同时输出 JSON 报告到此路径"),
     md_out: Path | None = typer.Option(None, "--markdown", help="同时输出 Markdown 报告到此路径"),
+    sarif_out: Path | None = typer.Option(
+        None, "--sarif", help="同时输出 SARIF 2.1.0 报告（GitHub Code Scanning / CI 集成）"
+    ),
+    fail_on_finding: bool = typer.Option(
+        True,
+        "--fail-on-finding/--no-fail-on-finding",
+        help="发现漏洞时以退出码 1 结束（CI 门禁）；--no-fail-on-finding 则始终返回 0",
+    ),
 ) -> None:
     """对目标智能体执行一次攻击测试。"""
     judge_llm = None
@@ -131,9 +139,14 @@ def attack(
     if md_out:
         md_out.write_text(result_to_markdown(result), encoding="utf-8")
         console.print(f"[dim]Markdown 报告已写入: {md_out}[/]")
+    if sarif_out:
+        from agent_shield.reporters import result_to_sarif, write_sarif
 
-    # 攻击成功 = 发现漏洞：非零退出码，方便 CI 集成
-    if result.successes:
+        write_sarif(sarif_out, result_to_sarif(result, target_name=target.name))
+        console.print(f"[dim]SARIF 报告已写入: {sarif_out}[/]")
+
+    # 攻击成功 = 发现漏洞：非零退出码，方便 CI 集成（可用 --no-fail-on-finding 关闭）
+    if result.successes and fail_on_finding:
         raise typer.Exit(code=1)
 
 

@@ -1,0 +1,51 @@
+# AgentShield 自扫描：跑一遍攻击 → 输出 SARIF → 上传到 GitHub Code Scanning
+#
+# 说明：这里演示"把 AgentShield 当 CI 门禁用"的最短路径。
+#   - 目标是仓库内置的脆弱靶场（Mock 模型，离线、零成本、确定性）；
+#   - 使用 --no-fail-on-finding，让流水线先收集告警而不是直接失败；
+#   - SARIF 上传后，发现会出现在仓库 Security → Code scanning 以及 PR 的检查里。
+name: AgentShield self-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # 上传 SARIF 需要
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Run AgentShield against the built-in demo target (SARIF)
+        run: |
+          agent-shield attack -m indirect_injection -n 3 --sarif agentshield.sarif --no-fail-on-finding
+          agent-shield attack -m privilege_escalation -n 3 --sarif agentshield-pe.sarif --no-fail-on-finding
+
+      - name: Upload SARIF to Code Scanning
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: agentshield.sarif
+          category: agentshield
+
+      - name: Upload privilege-escalation SARIF to Code Scanning
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: agentshield-pe.sarif
+          category: agentshield-privilege-escalation
