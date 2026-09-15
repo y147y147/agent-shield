@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Windows/本地可能为非 UTF-8 控制台：统一 UTF-8，避免中文输出导致编码异常
+  PYTHONUTF8: "1"
+
 jobs:
   scan:
     runs-on: ubuntu-latest

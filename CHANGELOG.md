@@ -40,6 +40,13 @@
 
 ### Fixed
 
+- **Windows 控制台中文输出崩溃（CI 上暴露）**：GitHub 的 Windows runner 上 `stdout` 默认编码为
+  **cp1252**，Rich 渲染中文/表格时抛 `UnicodeEncodeError`，使 `audit-benchmark` 步骤以退出码 1
+  失败（Linux/macOS 不受影响；本地可用 `PYTHONIOENCODING=cp1252` 复现）。修复：
+  - CLI 启动时把 `stdout`/`stderr` 强制切到 UTF-8 并以 `errors="replace"` 兜底
+    （`agent_shield/cli.py::_configure_stdio`，所有 CLI 命令共用）；
+  - 两个 workflow 统一设置 `PYTHONUTF8=1`，覆盖测试与校验脚本的输出；
+  - 新增回归测试 `tests/test_cli_stdio.py`（含"以 cp1252 启动子进程跑 CLI"的端到端复现）。
 - **CI lint 全红（工具链漂移）**：CI 按 `ruff>=0.5` 装到了 **0.16.7**，其默认规则集比本机 0.14 更宽
   （新增 `I` / `UP` / `DTZ` / `RUF` / `S` / `PLW` / `TRY` 等）→ 33 个报错、6 个矩阵任务全部卡在 Lint。
   处理方式：

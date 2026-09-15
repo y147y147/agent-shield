@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import typer
@@ -42,12 +43,31 @@ app = typer.Typer(help="AgentShield — LLM 智能体安全攻防框架", add_co
 console = Console()
 
 
+def _configure_stdio() -> None:
+    """把标准输出/错误切到 UTF-8。
+
+    背景：Windows 控制台与 CI runner 的默认编码是 cp1252（或 GBK），Rich 渲染中文与
+    制表符时会抛 ``UnicodeEncodeError``，导致命令以退出码 1 结束（GitHub Windows runner
+    上的 `audit-benchmark` 步骤即因此失败）。这里强制 UTF-8 并用 ``errors="replace"``
+    兜底：输出可能不好看，但绝不会因为编码问题而崩溃。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # 例如被测试框架替换过的流
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            continue
+
+
 @app.callback()
 def main(
     log_level: str = typer.Option("WARNING", "--log-level", help="日志级别: DEBUG/INFO/WARNING/ERROR（默认 WARNING）"),
     log_format: str = typer.Option("text", "--log-format", help="日志格式: text | json（json 为单行结构化日志，便于采集）"),
 ) -> None:
     """AgentShield CLI：日志默认静默，可用 --log-level/--log-format 打开结构化日志。"""
+    _configure_stdio()
     configure_logging(level=log_level, json_output=log_format.lower() == "json")
 
 

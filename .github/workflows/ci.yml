@@ -12,6 +12,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Windows runner 默认 cp1252：CLI 已自行切 UTF-8，这里再兜一层，
+  # 覆盖测试与校验脚本里的中文输出（曾导致 audit-benchmark 步骤失败）。
+  PYTHONUTF8: "1"
+
 jobs:
   test:
     name: ${{ matrix.os }} / py${{ matrix.python-version }}
