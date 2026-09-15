@@ -22,7 +22,7 @@ jobs:
       contents: read
       security-events: write  # 上传 SARIF 需要
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
