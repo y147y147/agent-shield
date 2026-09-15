@@ -30,13 +30,16 @@ LLM 智能体（Agent）通过**工具调用**获得了"行动能力"，也带�
 | 能力 | 说明 |
 | --- | --- |
 | 🎯 12 个攻击模块 | 覆盖 ASI-01 ~ ASI-10 全部 10 类风险（ASI-04 供应链投毒含工具通道与 MCP 通道两个变体），每个模块 `@register` 插件化，新增约 30 行 |
-| 🛡 6 层可插拔防护 | 注入检测器 / LLM-as-Judge / 语义策略引擎 / 工具完整性校验 / 调用预算 / 沙箱执行，全部失败关闭 |
+| 🛡 6 层可插拔防护 | 注入检测器 / LLM-as-Judge / 语义策略引擎 / 工具完整性校验 / 调用预算 / 沙箱执行，**全部失败关闭**（策略未覆盖的工具默认拒绝） |
 | ⚖ 攻防对比 | 同一攻击 × 加固前后，量化"防护把成功率压到多少" |
 | 🌐 真实模型可测 | 任意 OpenAI 兼容接口（DeepSeek / Qwen / GPT / Ollama）当靶子，跑多次统计真实成功率 |
 | 🔌 MITM 审计代理 | 插在 "智能体 ↔ LLM API" 之间，`audit / sanitize / block` 三种模式，事件入库 SQLite |
 | 🖥 Web 攻防工作台 | 攻防 / 多模型对比 / 策略测试 / 沙箱测试 / 自动审计 / 审计记录，零前端依赖，浏览器即用 |
 | 🧱 HTTP 黑盒靶场 | 把脆弱靶场暴露为 HTTP 服务，任意客户端黑盒测试；Docker 一键起服务 |
 | 🤝 MCP 支持 | 审计 MCP server 暴露的工具、把 MCP 工具接入防护链、模拟 MCP 投毒攻击 |
+| 📉 误报率（FPR）门禁 | 良性业务任务对照集 + `fp-benchmark --max-fpr`：既看"拦住了多少攻击"，也看"误伤了多少正常业务" |
+| 🧱 逃逸边界透明化 | 沙箱逃逸用例套件 v0 + [逃逸矩阵文档](docs/sandbox-escape-matrix.md)：明确写出能挡 19 类、挡不住 8 类 |
+| 📈 可观测性 | 结构化 JSON 日志 + Prometheus `GET /metrics`（代理与工作台），零依赖，可直接接 Grafana/SIEM |
 | 🧪 自动化测试 | 攻防闭环 / 代理 / MCP / 沙箱 / 语义策略 / Web 工作台全覆盖，全部离线可跑，CI 同款 |
 
 ## 快速开始
@@ -55,7 +58,8 @@ pip install -e ".[dev]"
 ### 10 秒体验（离线、零成本、确定性）
 
 ```bash
-agent-shield demo    # 攻防对比演示：先攻陷脆弱靶场（100% 成功）→ 挂防护重跑（0%）
+agent-shield demo            # 攻防对比演示：先攻陷脆弱靶场（100% 成功）→ 挂防护重跑（0%）
+agent-shield fp-benchmark    # 误报率门禁：跑良性业务任务集，检查防护有没有误伤正常业务
 ```
 
 ### Web 攻防工作台（推荐体验方式）
@@ -63,6 +67,7 @@ agent-shield demo    # 攻防对比演示：先攻陷脆弱靶场（100% 成功�
 ```bash
 agent-shield web --port 8086
 # 浏览器打开 http://127.0.0.1:8086
+# 指标端点：http://127.0.0.1:8086/metrics （Prometheus 文本格式）
 ```
 
 ## 功能详解
@@ -89,6 +94,11 @@ agent-shield attack -m rogue_agent                       # 失控智能体（ASI
 # 通用选项：变体数 / 自定义任务 / JSON 与 Markdown 报告导出
 agent-shield attack -m indirect_injection -n 5 --task "自定义任务" \
     --json report.json --markdown report.md
+
+# 导出 SARIF 2.1.0（GitHub Code Scanning / CI 集成）
+agent-shield attack -m indirect_injection -n 3 --sarif results.sarif
+# CI 里先收集报告、不因发现漏洞而失败：
+agent-shield attack -m indirect_injection -n 3 --sarif results.sarif --no-fail-on-finding
 ```
 
 > 设计约定：**攻击成功（发现漏洞）退出码 = 1**，全部失败退出码 = 0，方便接入 CI 做"智能体上线前安全检查"。
@@ -124,7 +134,8 @@ agent-shield attack --llm openai-compat --model qwen2.5:7b \
 
 ```bash
 agent-shield benchmark                 # 12 攻击向量 × 加固前后成功率（Mock：100% → 0%）
-agent-shield benchmark --markdown bench.md --json bench.json   # 导出报告
+agent-shield benchmark --runs 5        # 每模块跑 5 轮：输出成功率 + 95% Wilson 置信区间
+agent-shield benchmark --runs 5 --markdown bench.md --json bench.json   # 导出报告
 # 注：当前 benchmark 为离线 Mock 矩阵；单模块打真实模型用 attack（见上节）
 # 多模型聚合基准在路线图中（--llm openai-compat 横向对比）
 
@@ -216,7 +227,7 @@ agent-shield audit-schedule --cron "0 2 * * *" --once        # 定时触发
 | --- | --- | --- |
 | 注入检测器（规则快路径） | ASI-01/09 | 正则信号按行脱敏，工具输出 / 用户输入双通道 |
 | LLM-as-Judge（慢路径） | ASI-01/09 | 独立 LLM 判定 + 缓存，隔离提示词 |
-| 语义策略引擎（失败关闭） | ASI-02/03/05 | shell 元字符拦截 + 命令白名单 + 路径 realpath 根目录校验（防前缀绕过 / 路径穿越） |
+| 语义策略引擎（失败关闭） | ASI-02/03/05 | shell 元字符拦截 + 命令白名单 + 路径 realpath 根目录校验（防前缀绕过 / 路径穿越）；**未覆盖的工具默认拒绝**（可用 `default_action: allow` 或 `"*"` 通配规则显式放开） |
 | 工具完整性校验 | ASI-04 | 工具指纹比对，拦截被替换 / 篡改的工具 |
 | 调用预算 | ASI-08 | 单次运行工具调用次数上限 |
 | 沙箱执行 | ASI-05/08 | 危险命令黑名单（`rm -rf /`、`curl/wget` 外联等命中即拒）+ CPU/内存/文件限制 + 超时 + 固定工作目录 |
@@ -226,22 +237,27 @@ agent-shield audit-schedule --cron "0 2 * * *" --once        # 定时触发
 ```
 agent-shield/
 ├── agent_shield/
-│   ├── cli.py                 # CLI：attack / demo / audit / proxy / mcp / benchmark /
+│   ├── cli.py                 # CLI：attack / demo / audit / proxy / mcp / benchmark / fp-benchmark /
 │   │                          #      audit-benchmark / audit-schedule / web / dashboard / http-agent
 │   ├── models.py              # 轨迹、攻击用例、评分模型
 │   ├── attacks/               # 12 个攻击模块（插件化 @register，覆盖 ASI-01 ~ ASI-10）
 │   ├── defenses/              # 防护插件（GuardRail 接口，async，失败关闭）
-│   ├── core/                  # report + benchmark（攻击矩阵）+ audit_benchmark（质量回归）
+│   ├── core/                  # report + benchmark（攻击矩阵）+ stats（Wilson CI）
+│   │                          #      + fp_benchmark（误报率 FPR）+ audit_benchmark
+│   ├── reporters/             # 结果导出（SARIF 2.1.0 → GitHub Code Scanning / CI）
+│   ├── observability/         # 结构化 JSON 日志 + Prometheus 指标（/metrics）
 │   ├── runtime/               # 智能体运行时（agent / llm / tools，防护注入点 + 审计）
 │   ├── orchestrator/          # 自主审计指挥官（plan-execute / react / HITL / 会话 / PoC 报告）
-│   ├── proxy/                 # MITM 审计代理（FastAPI + SQLite 审计）
+│   ├── proxy/                 # MITM 审计代理（FastAPI + SQLite 审计 + /metrics）
 │   ├── targets/               # Target 适配层（local / http 黑盒 / mcp）
 │   ├── connectors/mcp.py      # MCP 客户端（JSON-RPC）
 │   ├── webapp.py              # Web 攻防工作台（原生 HTML/JS，零前端依赖）
 │   └── dashboard.py           # Web 审计看板
 ├── examples/vulnerable_agent/ # 故意有漏洞的 Demo 靶场
-├── tests/                     # 攻防闭环 / 代理 / MCP / 沙箱 / 语义策略 / Web 工作台测试
-├── docs/                      # 架构 / 攻击矩阵 / 使用指南 / 自主审计设计
+├── datasets/benign_tasks.yaml # 良性对照集（度量误报率 FPR）
+├── tests/                     # 攻防闭环 / 代理 / MCP / 沙箱 / 语义策略 / 逃逸用例 / Web 工作台
+├── docs/                      # 架构 / 攻击矩阵 / 使用指南 / 逃逸矩阵 / 自主审计设计 / v1.0 计划
+├── requirements-lock.txt      # 已验证的依赖版本快照（CI 有 locked-deps job 验证）
 ├── Dockerfile / docker-compose.yml   # Docker 一键起 HTTP 靶场 + 审计看板
 └── pyproject.toml / Makefile
 ```
@@ -301,10 +317,53 @@ engine = PolicyEngine.from_yaml("policy.yaml")   # 见 docs/getting-started.md
 ## 测试与代码质量
 
 ```bash
-pytest -q          # 全量测试（攻防闭环 / 12 模块 / 沙箱 / 语义策略 / ASI 映射），全部离线可跑
+pytest -q          # 全量测试（攻防闭环 / 12 模块 / 沙箱 / 语义策略 / 逃逸用例 / ASI 映射），全部离线可跑
 ruff check .       # 静态检查（CI 同款）
-# 或 make test / make lint
+# 或 make test / make lint / make fp / make escape
 ```
+
+## 防护质量：误报率、逃逸边界与可观测性
+
+**只报"攻击成功率降到 0%"是不够的** —— 如果防护同时把正常业务也拦了，就没人敢开。因此：
+
+```bash
+# 1) 误报率（FPR）门禁：36 条良性业务任务 + 3 条 near-miss 用例
+agent-shield fp-benchmark --max-fpr 0.05        # FPR 超阈值 → 退出码 1
+agent-shield fp-benchmark --json fpr.json --markdown fpr.md
+
+# 2) 沙箱逃逸边界：19 类已拦截 / 8 类 v0 明确挡不住（含策略层兜底）
+pytest -q tests/test_sandbox_escape.py
+# 边界矩阵（含 v1.0 强隔离验收标准）：docs/sandbox-escape-matrix.md
+
+# 3) 可观测性：结构化日志 + Prometheus 指标
+agent-shield --log-level INFO --log-format json attack -m indirect_injection   # 单行 JSON 日志
+agent-shield proxy --port 8090 --mock-upstream   # 然后 GET http://127.0.0.1:8090/metrics
+agent-shield web --port 8086                     # 然后 GET http://127.0.0.1:8086/metrics
+```
+
+指标覆盖：`agentshield_tool_calls_total{tool,decision}`、`agentshield_policy_decisions_total`、
+`agentshield_injection_findings_total{signal}`、`agentshield_sandbox_runs_total{outcome}`、
+`agentshield_guardrail_latency_seconds`（防护决策耗时，用于评估"防护开销 p95"）。
+
+> 实证价值：良性对照集上线当天就抓到并修掉了一个真实误报 —— 策略引擎在 Windows 上
+> 用 `shlex` 解析命令时把反斜杠当转义符，导致 `ls C:\dir\file` 这类合法命令被拒。
+
+## CI 集成（GitHub Actions）
+
+```yaml
+- run: pip install -e .
+- run: agent-shield attack -m indirect_injection -n 3 --sarif agentshield.sarif --no-fail-on-finding
+- run: agent-shield fp-benchmark --max-fpr 0.05        # 误报率门禁
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: agentshield.sarif
+```
+
+- `attack` 默认「**发现漏洞 → 退出码 1**」，可直接作为上线前门禁；加 `--no-fail-on-finding` 则始终返回 0（只收集报告）；
+- `fp-benchmark --max-fpr` 是"不能误伤业务"的门禁（本仓库 CI 每个平台都会跑）；
+- SARIF 2.1.0 报告可直接进 GitHub Code Scanning（本仓库自带 `.github/workflows/security-scan.yml` 自扫描示例）；
+- 基准评测用 `benchmark --runs N` 多轮聚合，输出 Wilson 置信区间 —— 避免把"单轮 100% / 0%"当成结论；
+- 依赖可复现：`requirements-lock.txt` + CI 的 `locked-deps` job（按锁定版本装包并跑全量测试）。
 
 ## Docker 部署
 
@@ -337,8 +396,11 @@ class MyAttack(AttackModule):
 - [x] v0.2：直接注入、越权模块；LLM-as-Judge；MITM 审计代理；MCP 连接器
 - [x] v0.3：工具投毒、数据窃取、记忆污染、资源滥用模块；完整性校验 / 调用预算防护；Web 审计看板；基准矩阵；HTTP 靶场；Docker
 - [x] v0.4：ASI 对齐 OWASP Agentic Top 10；补齐 4 模块 → **12 模块覆盖 ASI-01~10**（含 MCP 投毒变体）；沙箱执行；Web 攻防工作台（过程链流式 / 多模型对比 / 策略 / 沙箱 / 审计）；自主审计指挥官（plan/react / HITL / 会话 / PoC / 质量回归）；HTTP 目标适配
+- [x] v1.0-M0（工程化，进行中）：**fail-closed 策略默认拒绝**、SARIF 2.1.0 报告、Wilson 置信区间多轮评测、**误报率对照集与 FPR 门禁**、沙箱逃逸用例套件、可观测性（JSON 日志 + `/metrics`）、三平台 × 双版本 CI、依赖版本锁定
 - [ ] 多模型基准一键横向对比（`--llm openai-compat` 聚合报告）
 - [ ] 真实 Agent 框架适配（LangChain / 自建 Agent 的 Trace 采集）
+
+> 📋 **v1.0 演进计划书**：从「可运行的演示」到「可上生产的智能体安全平台」——包含现状审计（逐条给出 `文件:行` 证据）、目标架构与接口草案、40 项功能蓝图（P0/P1/P2 + 人日估算）、M0–M5 里程碑、度量体系，以及 12 项两周内可落地的快速改进：**[docs/optimization-plan-v1.0.md](docs/optimization-plan-v1.0.md)**。
 
 ## 伦理与合规
 

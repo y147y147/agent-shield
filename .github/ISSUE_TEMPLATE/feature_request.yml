@@ -1,0 +1,53 @@
+name: "✨ 功能建议 / Feature request"
+description: 建议新功能、新攻击向量或新防护能力
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 类别
+      options:
+        - 攻击模块 / 载荷（红队）
+        - 防护能力（策略 / 检测 / 沙箱 / 完整性）
+        - 评测与报告（指标 / SARIF / 置信区间）
+        - 接入与适配（框架 / MCP / A2A / 代理）
+        - 平台与工程化（Web / CI / 发布）
+        - 文档
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的场景 / 痛点
+      description: 最好给出具体案例（例如"我们的 Agent 用了 X，希望审计 Y"）
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的方案
+      description: 接口/CLI 形态、期望输出、与现有模块的关系
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你考虑过的替代方案
+    validations:
+      required: false
+  - type: input
+    id: mapping
+    attributes:
+      label: 相关标准映射（可选）
+      description: 如 OWASP ASI / MITRE ATLAS 编号
+      placeholder: "ASI-04 / AML.T0104"
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 Issue / 路线图（docs/optimization-plan-v1.0.md）
+          required: true

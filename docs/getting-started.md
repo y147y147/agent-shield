@@ -79,7 +79,8 @@ agent-shield attack --llm openai-compat --model qwen2.5:7b \
 
 ```bash
 agent-shield benchmark                 # 12 个攻击向量（ASI-01~10 全覆盖）× 加固前后成功率（Mock 离线矩阵）
-agent-shield benchmark --markdown bench.md --json bench.json
+agent-shield benchmark --runs 5        # 每模块 5 轮：成功率 + Wilson 95% 置信区间（单轮 100%/0% 不等于结论）
+agent-shield benchmark --runs 5 --markdown bench.md --json bench.json
 # 注：benchmark 暂为离线 Mock 矩阵；打真实模型用单模块 attack（见上）
 
 # 自主审计指挥官质量回归（离线；改 Prompt 后跑此命令可检测退化）
@@ -117,10 +118,11 @@ Docker 一键起靶场 + 看板：`docker compose up --build`（见 docker-compo
 
 ## 自定义策略
 
-策略引擎支持 YAML 覆写默认策略（默认失败关闭）：
+策略引擎支持 YAML 覆写默认策略（**默认失败关闭**：未覆盖的工具、未写 `action` 的规则一律拒绝）：
 
 ```yaml
 # policy.yaml
+default_action: deny          # 未覆盖工具的兜底动作（默认即 deny，可显式写出来）
 run_command:
   action: deny
   allow:
@@ -128,6 +130,8 @@ run_command:
   deny:
     - "rm\\s+-rf"
 web_search:
+  action: allow               # allow 表示默认放行，仅在命中 deny 时拦截
+"*":                          # 可选：通配兜底规则（优先级低于精确工具名）
   action: allow
 ```
 

@@ -1,0 +1,65 @@
+name: "🐞 Bug 报告 / Bug report"
+description: 报告可复现的问题（安全漏洞请改用私密渠道，见 SECURITY.md）
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先搜索是否已有同类 Issue。
+        ⚠️ **安全漏洞请勿在此提交**：请使用仓库 Security → Report a vulnerability（见 [SECURITY.md](../blob/main/SECURITY.md)）。
+  - type: input
+    id: version
+    attributes:
+      label: AgentShield 版本 / 提交号
+      description: 例如 0.4.0 或 commit sha（`agent-shield --help` 或 `git rev-parse HEAD`）
+      placeholder: "0.4.0 / e007bfb"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 操作系统与版本、Python 版本、安装方式（pip -e / docker）
+      placeholder: "Windows 11, Python 3.12.7, pip install -e \".[dev]\""
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: 复现命令与配置
+      description: 完整命令（含 CLI 选项）；如涉及策略/目标，请附上相关配置片段
+      placeholder: |
+        agent-shield attack -m indirect_injection --defense -n 3
+        # 或 python 代码片段 / 策略 YAML
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 请附上完整报错或输出（可用 `--json` 导出报告）
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 相关日志、轨迹片段、SARIF/JSON 报告（注意先脱敏，不要贴真实密钥）
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 Issue，未发现重复
+          required: true
+        - label: 这是可复现的功能性缺陷，而不是安全问题或使用咨询
+          required: true

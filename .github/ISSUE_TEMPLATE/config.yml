@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "🔒 安全漏洞（私密报告）"
+    url: https://github.com/y147y147/agent-shield/security/advisories/new
+    about: 请勿用公开 Issue 报告安全漏洞，改用私密渠道；详见 SECURITY.md
+  - name: "📖 使用文档"
+    url: https://github.com/y147y147/agent-shield/blob/main/docs/usage-guide.md
+    about: 安装、命令、API 用法与常见问题
+  - name: "🗺 v1.0 演进计划"
+    url: https://github.com/y147y147/agent-shield/blob/main/docs/optimization-plan-v1.0.md
+    about: 已规划的功能与里程碑（提建议前建议先看这里）
