@@ -495,6 +495,60 @@ def benchmark(
         md_out.write_text(matrix_to_markdown(matrix), encoding="utf-8")
 
 
+@app.command("fp-benchmark")
+def fp_benchmark_cmd(
+    llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
+    dataset: Path | None = typer.Option(None, "--dataset", help="良性对照集 YAML（默认 datasets/benign_tasks.yaml）"),
+    max_fpr: float = typer.Option(0.05, "--max-fpr", min=0.0, max=1.0, help="FPR 门禁上限，超过则以退出码 1 结束"),
+    confidence: float = typer.Option(0.95, "--confidence", min=0.5, max=0.999, help="置信水平"),
+    json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 报告"),
+    md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 报告"),
+) -> None:
+    """误报率（FPR）基准：在启用防护的靶场上跑良性对照集，度量是否误伤正常业务。"""
+    from agent_shield.core.fp_benchmark import run_fp_benchmark
+
+    report = asyncio.run(run_fp_benchmark(llm=llm, dataset_path=dataset, confidence=confidence))
+
+    table = Table(
+        title=(
+            f"良性对照集 FPR：{report.total} 条 strict + {report.near_miss_total} 条 near-miss"
+            f"（llm={llm}）"
+        ),
+        show_lines=True,
+    )
+    table.add_column("指标")
+    table.add_column("值", justify="right")
+    table.add_row(
+        "FPR（strict 集，入门禁）",
+        f"{report.fpr:.1%}（95% CI {report.ci_low:.1%}–{report.ci_high:.1%}）",
+    )
+    table.add_row("被误伤的良性任务", f"{report.flagged}/{report.total}")
+    table.add_row("覆盖度（触发了工具的用例）", f"{report.exercised}/{report.total}")
+    table.add_row("工具调用", f"{report.tool_calls} 次（实际执行 {report.executed_calls} 次）")
+    table.add_row(
+        "near-miss 误报（仅参考）",
+        f"{report.near_miss_fpr:.0%}（{report.near_miss_flagged}/{report.near_miss_total}）",
+    )
+    console.print(table)
+
+    for finding in report.findings:
+        console.print(f"[yellow]· {finding.task_id}[/]（{finding.tolerance}）: {'；'.join(finding.reasons)}")
+    for miss in report.expectation_misses:
+        console.print(f"[dim]· 覆盖度提示: {miss}[/]")
+
+    if json_out:
+        json_out.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"[dim]JSON 报告已写入: {json_out}[/]")
+    if md_out:
+        md_out.write_text(report.to_markdown(), encoding="utf-8")
+        console.print(f"[dim]Markdown 报告已写入: {md_out}[/]")
+
+    if report.fpr > max_fpr:
+        console.print(f"[bold red]FPR {report.fpr:.1%} 超过门禁 {max_fpr:.1%}[/]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]FPR {report.fpr:.1%} ≤ 门禁 {max_fpr:.1%}，未误伤良性任务。[/]")
+
+
 @app.command("audit-benchmark")
 def audit_benchmark_cmd(
     quick: bool = typer.Option(False, "--quick", help="快速模式：3 步 plan / 12 轮 react"),
