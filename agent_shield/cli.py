@@ -457,25 +457,37 @@ def mcp(
 def benchmark(
     llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
     variants: int = typer.Option(3, "--variants", "-n", min=1),
+    runs: int = typer.Option(1, "--runs", min=1, help="每个模块重复轮次（多轮聚合，输出 Wilson 置信区间）"),
     json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 矩阵"),
     md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 矩阵"),
 ) -> None:
-    """基准评测：全部攻击模块 × 加固前后成功率矩阵。"""
-    from agent_shield.core.benchmark import matrix_to_markdown, run_benchmark_matrix
+    """基准评测：全部攻击模块 × 加固前后成功率矩阵（含置信区间）。"""
+    from agent_shield.core.benchmark import format_matrix_rate, matrix_to_markdown, run_benchmark_matrix
 
-    matrix = asyncio.run(run_benchmark_matrix(llm=llm, num_variants=variants))
+    matrix = asyncio.run(run_benchmark_matrix(llm=llm, num_variants=variants, runs=runs))
 
-    table = Table(title=f"基准评测：{len(matrix)} 个攻击向量（llm={llm}）", show_lines=True)
+    cases_per_module = variants * runs
+    table = Table(
+        title=f"基准评测：{len(matrix)} 个攻击向量（llm={llm}，{runs} 轮 × {variants} 变体 = {cases_per_module} 用例/模块）",
+        show_lines=True,
+    )
     table.add_column("攻击模块", style="cyan")
     table.add_column("OWASP", justify="center")
     table.add_column("ATLAS", justify="center")
-    table.add_column("加固前成功率", justify="center")
-    table.add_column("加固后成功率", justify="center")
+    table.add_column("加固前成功率（95% CI）", justify="center")
+    table.add_column("加固后成功率（95% CI）", justify="center")
     for row in matrix:
-        before = f"[bold red]{row['vulnerable_success_rate']:.0%}[/]" if row["vulnerable_success_rate"] else "[green]0%[/]"
-        after = f"[green]{row['defended_success_rate']:.0%}[/]" if row["defended_success_rate"] == 0 else f"[bold red]{row['defended_success_rate']:.0%}[/]"
+        before_text = format_matrix_rate(row, "vulnerable")
+        after_text = format_matrix_rate(row, "defended")
+        before = f"[bold red]{before_text}[/]" if row["vulnerable_success_rate"] else f"[green]{before_text}[/]"
+        after = f"[green]{after_text}[/]" if row["defended_success_rate"] == 0 else f"[bold red]{after_text}[/]"
         table.add_row(row["module"], row["owasp_asi"] or "—", row["atlas_id"] or "—", before, after)
     console.print(table)
+    if runs > 1:
+        console.print(
+            f"[dim]置信区间为 Wilson score interval（{int(round(matrix[0]['confidence'] * 100)) if matrix else 95}%）。"
+            f"单轮 100%/0% 不等于「必然/绝不可能」，多轮运行可给出误差范围。[/]"
+        )
 
     if json_out:
         json_out.write_text(json.dumps(matrix, ensure_ascii=False, indent=2), encoding="utf-8")
