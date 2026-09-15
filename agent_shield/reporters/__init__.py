@@ -6,6 +6,7 @@
 """
 
 from agent_shield.reporters.sarif import (
+    DEFAULT_TARGET_ARTIFACT,
     SARIF_SCHEMA,
     SARIF_VERSION,
     dumps,
@@ -16,6 +17,7 @@ from agent_shield.reporters.sarif import (
 )
 
 __all__ = [
+    "DEFAULT_TARGET_ARTIFACT",
     "SARIF_SCHEMA",
     "SARIF_VERSION",
     "dumps",

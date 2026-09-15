@@ -32,6 +32,17 @@ SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 TOOL_NAME = "AgentShield"
 INFORMATION_URI = "https://github.com/y147y147/agent-shield"
 HELP_URI = f"{INFORMATION_URI}/blob/main/docs/attack-taxonomy.md"
+# Code Scanning 只接受仓库相对路径；默认指向内置靶场的目标定义文件
+DEFAULT_TARGET_ARTIFACT = "agent_shield/targets/local.py"
+
+
+def _relative_artifact_uri(artifact: str) -> str:
+    """把 artifact 归一化为仓库相对路径（去掉自定义 scheme、前导斜杠与反斜杠）。"""
+    text = str(artifact).strip().replace("\\", "/")
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    text = text.lstrip("/")
+    return text or DEFAULT_TARGET_ARTIFACT
 
 _LEVEL_BY_SEVERITY: dict[Severity, str] = {
     Severity.CRITICAL: "error",
@@ -80,7 +91,7 @@ def _rule_for(module: str, description: str, owasp_asi: str | None, atlas_id: st
     }
 
 
-def _result_for(result: AttackResult, case, target_name: str) -> dict[str, Any]:
+def _result_for(result: AttackResult, case, target_name: str, target_artifact: str) -> dict[str, Any]:
     evidence = "；".join(case.evidence) or f"{result.module} 攻击成功（未附证据）"
     return {
         "ruleId": _rule_id(result.module),
@@ -88,7 +99,7 @@ def _result_for(result: AttackResult, case, target_name: str) -> dict[str, Any]:
         "message": {"text": f"[{case.severity.value}] {evidence}"},
         "locations": [
             {
-                "physicalLocation": {"artifactLocation": {"uri": f"agent://{target_name}"}},
+                "physicalLocation": {"artifactLocation": {"uri": target_artifact}},
                 "logicalLocations": [{"name": target_name, "kind": "resource"}],
             }
         ],
@@ -111,13 +122,18 @@ def results_to_sarif(
     results: Sequence[AttackResult],
     *,
     target_name: str = "agent-under-test",
+    target_artifact: str = DEFAULT_TARGET_ARTIFACT,
     include_non_success: bool = False,
 ) -> dict[str, Any]:
     """把一批攻击结果渲染为 SARIF 2.1.0 文档。
 
     参数：
         results: 攻击结果列表（同一目标上的多次/多模块攻击）。
-        target_name: 被审计目标的名称，进入 ``agent://`` 逻辑 URI 与 result 属性。
+        target_name: 被审计目标的名称，写入 ``logicalLocations`` 与 result 属性（人类可读）。
+        target_artifact: 仓库相对路径，作为 ``physicalLocation.artifactLocation.uri``。
+            GitHub Code Scanning 要求该 uri 是**相对路径**（不接受 ``agent://`` 等自定义 scheme，
+            否则上传报 "an invalid URI was provided as a SARIF location"），因此默认指向
+            内置靶场的目标定义文件；自定义 scheme 会被自动归一化为相对路径。
         include_non_success: 是否把"未生效/被拦截"的用例也写入 results（默认只写漏洞确认）。
     """
     rules: list[dict[str, Any]] = []
@@ -125,6 +141,7 @@ def results_to_sarif(
     sarif_results: list[dict[str, Any]] = []
     total_cases = 0
     successes = 0
+    artifact_uri = _relative_artifact_uri(target_artifact)
 
     for result in results:
         if result.module not in seen_rules:
@@ -135,7 +152,7 @@ def results_to_sarif(
         for case in result.cases:
             if not include_non_success and case.verdict != AttackVerdict.SUCCESS:
                 continue
-            sarif_results.append(_result_for(result, case, target_name))
+            sarif_results.append(_result_for(result, case, target_name, artifact_uri))
 
     return {
         "$schema": SARIF_SCHEMA,
@@ -167,10 +184,16 @@ def result_to_sarif(
     result: AttackResult,
     *,
     target_name: str = "agent-under-test",
+    target_artifact: str = DEFAULT_TARGET_ARTIFACT,
     include_non_success: bool = False,
 ) -> dict[str, Any]:
     """单个攻击模块的结果 → SARIF 文档（便捷封装）。"""
-    return results_to_sarif([result], target_name=target_name, include_non_success=include_non_success)
+    return results_to_sarif(
+        [result],
+        target_name=target_name,
+        target_artifact=target_artifact,
+        include_non_success=include_non_success,
+    )
 
 
 def dumps(sarif: dict[str, Any]) -> str:

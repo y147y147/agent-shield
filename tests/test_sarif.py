@@ -16,6 +16,7 @@ from agent_shield.models import (
     Severity,
 )
 from agent_shield.reporters import (
+    DEFAULT_TARGET_ARTIFACT,
     SARIF_SCHEMA,
     SARIF_VERSION,
     dumps,
@@ -108,12 +109,38 @@ def test_sarif_result_mapping():
     first = doc["runs"][0]["results"][0]
     assert first["ruleId"] == "agentshield/indirect_injection"
     assert first["level"] == "error"
-    assert first["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "agent://demo-agent"
+    assert first["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == DEFAULT_TARGET_ARTIFACT
     assert first["locations"][0]["logicalLocations"][0]["name"] == "demo-agent"
     assert "智能体执行了攻击者控制的命令" in first["message"]["text"]
     assert first["partialFingerprints"]["agentShieldCase/v1"] == "indirect_injection:variant-1"
     # 无证据时给出兜底文案，避免空 message
     assert "攻击成功" in doc["runs"][0]["results"][1]["message"]["text"]
+
+
+def test_sarif_locations_are_repo_relative():
+    """回归：GitHub Code Scanning 要求 location 的 uri 是仓库相对路径。
+
+    此前用 ``agent://<target>`` 导致上传失败：
+    "Code Scanning could not process the submitted SARIF file: an invalid URI was provided
+     as a SARIF location: parse "agent://vulnerable-office-agent[vulnerable]": invalid IP-literal"
+    """
+    doc = result_to_sarif(_result(), target_name="vulnerable-office-assistant[vulnerable]", include_non_success=True)
+    for item in doc["runs"][0]["results"]:
+        uri = item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert "://" not in uri, f"uri 不能带自定义 scheme: {uri}"
+        assert not uri.startswith("/"), f"uri 必须是相对路径: {uri}"
+        assert "[" not in uri and " " not in uri, f"uri 不能含空格/方括号: {uri}"
+
+
+def test_sarif_normalizes_custom_scheme_artifact():
+    doc = result_to_sarif(_result(), target_artifact="agent://my-target[defended]")
+    uri = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert uri == "my-target[defended]".replace("\\", "/")
+    assert "agent://" not in uri
+
+    windows = result_to_sarif(_result(), target_artifact="agents\\shield\\target.py")
+    uri_w = windows["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert uri_w == "agents/shield/target.py"
 
 
 @pytest.mark.parametrize(

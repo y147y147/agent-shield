@@ -40,6 +40,24 @@
 
 ### Fixed
 
+- **CI lint 全红（工具链漂移）**：CI 按 `ruff>=0.5` 装到了 **0.16.7**，其默认规则集比本机 0.14 更宽
+  （新增 `I` / `UP` / `DTZ` / `RUF` / `S` / `PLW` / `TRY` 等）→ 33 个报错、6 个矩阵任务全部卡在 Lint。
+  处理方式：
+  - `pyproject.toml` 用 `[tool.ruff.lint] select` **显式固定规则集**（`E4/E7/E9/F/I/UP/DTZ`），
+    并把 `ruff` 钉到 `>=0.16,<0.17`，避免以后再被默认规则集扩张打到；
+  - 修复全部报错：datetime 一律显式带时区（`datetime.now(UTC)` / `tzinfo=UTC`）、导入排序、
+    `typing.Sequence/Iterable` → `collections.abc`、`__all__` 排序、`datetime.UTC`、
+    `subprocess.run(..., check=False)` 显式传参、进度回调异常不再静默 `pass`（改为 debug 日志）、
+    去掉 `int(round(...))` 冗余转换；
+  - 行为变更（次要）：规划器输出不是 JSON 对象时由 `ValueError` 改为 `TypeError`（ruff TRY004 建议，
+    调用方均未依赖该异常类型）；
+  - 暂缓 `UP042`（`str, Enum` → `StrEnum`）：会改变 `str(Enum)` 的运行时返回值，单独评估后再改。
+- **Code Scanning 上传失败**：SARIF 的 `physicalLocation.artifactLocation.uri` 原先使用
+  `agent://<target>` 自定义 scheme，GitHub 报
+  `an invalid URI was provided as a SARIF location: parse "agent://...": invalid IP-literal`。
+  现改为**仓库相对路径**（默认 `agent_shield/targets/local.py`，可用 `target_artifact=` 覆盖），
+  人类可读的目标名仍保留在 `logicalLocations` 与 result 属性中；CI 的 SARIF 校验步骤新增
+  "uri 必须是相对路径且不含 scheme"断言，防止回归。
 - **Windows 误报修复**：策略引擎解析命令时 `shlex(posix=True)` 会把反斜杠当作转义符，
   导致 `ls C:\dir\file` 这类**合法**命令被误判为"越界路径"而拒绝；现于 Windows 上先统一
   路径分隔符再解析。该误报由良性对照集（`fp-benchmark`）发现，并已加跨平台回归用例。

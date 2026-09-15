@@ -91,6 +91,11 @@ jobs:
           assert run["tool"]["driver"]["name"] == "AgentShield"
           assert run["tool"]["driver"]["rules"], "SARIF 应包含规则定义"
           assert run["results"], "脆弱靶场应至少产出一条发现"
+          # Code Scanning 要求 location 的 uri 是仓库相对路径（回归自 agent:// 上传失败事故）
+          for item in run["results"]:
+              uri = item["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+              assert "://" not in uri, f"uri 不能带 scheme: {uri}"
+              assert not uri.startswith("/"), f"uri 必须是相对路径: {uri}"
           print(f"SARIF ok: rules={len(run['tool']['driver']['rules'])} results={len(run['results'])}")
           PY
 
