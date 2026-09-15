@@ -3,4 +3,4 @@
 An open-source red-team & runtime-guard framework for LLM agents.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"

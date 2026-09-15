@@ -1,0 +1,34 @@
+# 已验证的依赖版本快照（Reproducible install snapshot）
+#
+# 用途：把"某次真实跑通全量测试的环境"固化下来，避免上游发新版导致 CI/本地行为漂移。
+#
+# 来源：2026-09 在本机 Python 3.12.7 环境下 `pytest -q` 全绿（256 passed / 2 skipped）、
+#       `ruff check .` 全绿后由 `importlib.metadata` 导出，因此这是一组**经过验证**的版本，
+#       而不是"理论最新"。
+#
+# 用法（CI 中的 "locked-deps" job 即按此流程验证）：
+#     pip install -r requirements-lock.txt
+#     pip install -e . --no-deps      # 只装本项目，依赖已由上面的锁定集合提供
+#     pytest -q
+#
+# 说明：
+# - 只锁定**直接依赖 + 关键间接依赖**；间接依赖由 pip 解析（如需完整传递闭包请用 uv lock）。
+# - 升级流程：改 pyproject.toml 的版本区间 → 本地/CI 跑通 → 回收此文件中的版本号。
+
+# ---- 运行时依赖 ----
+typer==0.20.0
+rich==13.7.1
+pydantic==2.8.2
+httpx==0.27.0
+PyYAML==6.0.1
+fastapi==0.121.0
+uvicorn==0.38.0
+
+# ---- 开发/测试依赖 ----
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.14.4
+
+# ---- 关键间接依赖（钉住避免行为差异）----
+starlette==0.49.3
+anyio==4.2.0

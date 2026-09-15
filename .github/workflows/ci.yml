@@ -5,22 +5,97 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Install
         run: pip install -e ".[dev]"
+
       - name: Lint
         run: ruff check .
+
       - name: Audit benchmark (quick)
         run: agent-shield audit-benchmark --quick
+
+      - name: False-positive benchmark (benign control set gate)
+        run: agent-shield fp-benchmark --max-fpr 0.05
+
       - name: Test
         run: pytest -q
+
+      - name: Offline demo smoke test
+        run: agent-shield demo
+
+  locked-deps:
+    name: Reproducible install (locked versions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install locked dependency set
+        run: pip install -r requirements-lock.txt
+
+      - name: Install project without re-resolving dependencies
+        run: pip install -e . --no-deps
+
+      - name: Test against the locked set
+        run: pytest -q
+
+  sarif:
+    name: SARIF report smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Generate SARIF report
+        run: agent-shield attack -m indirect_injection -n 3 --sarif agentshield.sarif --no-fail-on-finding
+
+      - name: Validate SARIF structure
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          doc = json.loads(pathlib.Path("agentshield.sarif").read_text(encoding="utf-8"))
+          assert doc["version"] == "2.1.0", doc["version"]
+          run = doc["runs"][0]
+          assert run["tool"]["driver"]["name"] == "AgentShield"
+          assert run["tool"]["driver"]["rules"], "SARIF 应包含规则定义"
+          assert run["results"], "脆弱靶场应至少产出一条发现"
+          print(f"SARIF ok: rules={len(run['tool']['driver']['rules'])} results={len(run['results'])}")
+          PY
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentshield-sarif
+          path: agentshield.sarif

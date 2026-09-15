@@ -1,23 +1,44 @@
 """沙箱执行测试：SandboxExecutor + RunCommandTool(sandbox=True) + build_local_target(sandbox=)。
 
 沙箱两层防护：危险命令黑名单（命中即拒绝执行）+ 资源限制（CPU/内存/文件/超时）。
+
+多平台说明：测试命令统一用 ``sys.executable`` 调用 Python 脚本，不依赖 ``touch`` /
+``sleep`` 等 POSIX-only 命令（Windows cmd 没有），保证 Linux/macOS/Windows CI 结果一致。
 """
+
+from __future__ import annotations
+
+import sys
 
 from agent_shield.defenses import SandboxExecutor, SandboxLimits
 from agent_shield.runtime.tools import RunCommandTool
 from agent_shield.targets import build_local_target
 
 
+def _python_cmd(script_path) -> str:
+    """跨平台命令：显式引用解释器与脚本路径（路径含空格也可用）。"""
+    return f'"{sys.executable}" "{script_path}"'
+
+
 def test_sandbox_executor_runs_benign_command(tmp_path):
+    target = tmp_path / "ok.txt"
+    script = tmp_path / "make_file.py"
+    script.write_text(
+        f"import pathlib; pathlib.Path(r'{target}').write_text('ok', encoding='utf-8')",
+        encoding="utf-8",
+    )
     exe = SandboxExecutor()
-    result = exe.run(f"touch {tmp_path / 'ok'}")
-    assert result.ok
-    assert (tmp_path / "ok").exists()
+    result = exe.run(_python_cmd(script))
+    assert result.ok, result.stderr
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "ok"
 
 
-def test_sandbox_executor_enforces_timeout():
+def test_sandbox_executor_enforces_timeout(tmp_path):
+    script = tmp_path / "sleepy.py"
+    script.write_text("import time; time.sleep(30)", encoding="utf-8")
     exe = SandboxExecutor(limits=SandboxLimits(timeout_seconds=1))
-    result = exe.run("sleep 5")
+    result = exe.run(_python_cmd(script))
     assert result.timed_out
     assert not result.ok
 

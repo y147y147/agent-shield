@@ -13,16 +13,25 @@ from agent_shield.webapp import build_web_app
 runner = CliRunner()
 
 
-def test_cli_audit_plan_mock():
-    result = runner.invoke(app, ["audit", "--mode", "plan", "--llm", "mock", "--steps", "3", "--no-compare-defense"])
+def test_cli_audit_plan_mock(tmp_path):
+    # --session-db 指向临时库：避免写真实用户目录（~/.agent-shield），测试保持自包含
+    result = runner.invoke(
+        app,
+        ["audit", "--mode", "plan", "--llm", "mock", "--steps", "3", "--no-compare-defense",
+         "--session-db", str(tmp_path / "sessions.db")],
+    )
     assert result.exit_code == 0, result.output
     assert "自主安全审计" in result.output or "Plan-and-Execute" in result.output
     assert "direct_injection" in result.output
     assert "risk=" in result.output
 
 
-def test_cli_audit_react_mock():
-    result = runner.invoke(app, ["audit", "--mode", "react", "--llm", "mock", "--no-compare-defense"])
+def test_cli_audit_react_mock(tmp_path):
+    result = runner.invoke(
+        app,
+        ["audit", "--mode", "react", "--llm", "mock", "--no-compare-defense",
+         "--session-db", str(tmp_path / "sessions.db")],
+    )
     assert result.exit_code == 0, result.output
     assert "react" in result.output.lower() or "ReAct" in result.output
     assert "direct_injection" in result.output
