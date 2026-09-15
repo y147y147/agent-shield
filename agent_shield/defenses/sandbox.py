@@ -22,6 +22,8 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 
+from agent_shield.observability import SANDBOX_RUNS
+
 try:
     import resource  # Unix only；Windows 无此模块
 except ImportError:  # pragma: no cover
@@ -89,6 +91,17 @@ class SandboxExecutor:
         self.cwd = cwd if cwd is not None else (tempfile.gettempdir() if os.name == "nt" else "/tmp")
         self._deny = [(re.compile(p), p) for p in (deny_patterns if deny_patterns is not None else DANGEROUS_COMMAND_PATTERNS)]
 
+    def deny_match(self, command: str) -> str | None:
+        """返回命中的危险命令模式（未命中返回 ``None``）；不执行任何命令。
+
+        用途：逃逸用例套件（`tests/test_sandbox_escape.py`）与"只做判定不落执行"的
+        调用方，可以安全地检查某条命令是否会被黑名单拦截。
+        """
+        for rx, pattern in self._deny:
+            if rx.search(command):
+                return pattern
+        return None
+
     def run(self, command: str, sandbox: bool = True) -> SandboxResult:
         """执行命令。sandbox=False 时仅保留超时，用于对照（脆弱靶场）。
 
@@ -97,14 +110,15 @@ class SandboxExecutor:
         因此即使关闭沙箱开关，危险命令也会被策略层拦截。
         """
         if sandbox:
-            for rx, pattern in self._deny:
-                if rx.search(command):
-                    return SandboxResult(
-                        returncode=-2,
-                        stdout="",
-                        stderr=f"denied by sandbox policy: {pattern}",
-                        denied=True,
-                    )
+            pattern = self.deny_match(command)
+            if pattern is not None:
+                SANDBOX_RUNS.inc(outcome="denied")
+                return SandboxResult(
+                    returncode=-2,
+                    stdout="",
+                    stderr=f"denied by sandbox policy: {pattern}",
+                    denied=True,
+                )
         # preexec_fn / resource 仅 Unix 可用；Windows 仍保留黑名单 + 超时
         preexec_fn = self._limit_resources if sandbox and resource is not None else None
         run_kwargs: dict = {
@@ -119,12 +133,14 @@ class SandboxExecutor:
             run_kwargs["preexec_fn"] = preexec_fn
         try:
             proc = subprocess.run(command, **run_kwargs)
+            SANDBOX_RUNS.inc(outcome="ok" if proc.returncode == 0 else "error")
             return SandboxResult(
                 returncode=proc.returncode,
                 stdout=proc.stdout.strip(),
                 stderr=proc.stderr.strip(),
             )
         except subprocess.TimeoutExpired:
+            SANDBOX_RUNS.inc(outcome="timeout")
             return SandboxResult(
                 returncode=-1,
                 stdout="",

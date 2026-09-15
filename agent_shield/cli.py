@@ -35,10 +35,20 @@ from rich.table import Table
 from agent_shield.attacks import AttackConfig, get_attack_module, list_attack_modules
 from agent_shield.core.report import result_to_json, result_to_markdown
 from agent_shield.runtime.llm import OpenAICompatLLM
+from agent_shield.observability import configure_logging
 from agent_shield.targets import DEFAULT_TASK, build_local_target
 
 app = typer.Typer(help="AgentShield — LLM 智能体安全攻防框架", add_completion=False)
 console = Console()
+
+
+@app.callback()
+def main(
+    log_level: str = typer.Option("WARNING", "--log-level", help="日志级别: DEBUG/INFO/WARNING/ERROR（默认 WARNING）"),
+    log_format: str = typer.Option("text", "--log-format", help="日志格式: text | json（json 为单行结构化日志，便于采集）"),
+) -> None:
+    """AgentShield CLI：日志默认静默，可用 --log-level/--log-format 打开结构化日志。"""
+    configure_logging(level=log_level, json_output=log_format.lower() == "json")
 
 
 def _render_result(result) -> None:

@@ -20,9 +20,10 @@ from copy import deepcopy
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from agent_shield.defenses import InjectionDetector
+from agent_shield.observability import render_metrics
 from agent_shield.proxy.audit import AuditStore
 
 
@@ -122,5 +123,10 @@ def build_proxy_app(
     @app.get("/audit/latest")
     async def audit_latest(n: int = 20) -> dict:
         return {"events": store.latest(n)}
+
+    @app.get("/metrics")
+    async def metrics() -> PlainTextResponse:
+        """Prometheus 文本格式指标（检测命中、策略决策、沙箱执行、防护耗时）。"""
+        return PlainTextResponse(render_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
     return app

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from agent_shield.defenses.base import GuardRail
 from agent_shield.models import Severity, ToolCall
+from agent_shield.observability import INJECTION_FINDINGS
 
 # (正则, 信号描述, 严重度)
 SIGNALS: list[tuple[str, str, Severity]] = [
@@ -55,6 +56,7 @@ class InjectionDetector(GuardRail):
                     findings.append(
                         Detection(signal=desc, severity=sev, line_no=line_no, snippet=line.strip()[:120])
                     )
+                    INJECTION_FINDINGS.inc(signal=desc)
                     break  # 一行只需记录一个信号
         return findings
 

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
 from agent_shield.models import AgentTrace, BlockedCall, ChatMessage, ToolCall, TraceStep
+from agent_shield.observability import GUARDRAIL_LATENCY, TOOL_CALLS, get_logger, log_event
 from agent_shield.runtime.llm import LLMClient
 from agent_shield.runtime.tools import ToolRegistry
+
+logger = get_logger("runtime.agent")
 
 SYSTEM_PROMPT = (
     "你是一个办公助理智能体，可以使用提供的工具完成任务。"
@@ -132,11 +136,27 @@ class AgentRuntime:
         )
 
     async def _check_tool_call(self, call: ToolCall) -> ToolCallDecision:
+        started = time.perf_counter()
+        decision = ToolCallDecision(allowed=True, reason="allowed")
         for guard in self.guardrails:
             decision = await guard.check_tool_call(call)
             if not decision.allowed:
-                return decision
-        return ToolCallDecision(allowed=True, reason="allowed")
+                break
+        GUARDRAIL_LATENCY.observe(time.perf_counter() - started, tool=call.name)
+        TOOL_CALLS.inc(tool=call.name, decision="allowed" if decision.allowed else "blocked")
+        if not decision.allowed:
+            log_event(
+                logger,
+                "tool_call_blocked",
+                level=logging.INFO,
+                tool=call.name,
+                reason=decision.reason,
+                arguments=json.dumps(call.arguments, ensure_ascii=False)[:300],
+            )
+        elif logger.isEnabledFor(logging.DEBUG):
+            log_event(logger, "tool_call_allowed", level=logging.DEBUG, tool=call.name,
+                      reason=decision.reason)
+        return decision
 
     async def _sanitize_tool_output(self, call: ToolCall, output: str) -> str:
         for guard in self.guardrails:

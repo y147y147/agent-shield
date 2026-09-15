@@ -19,13 +19,14 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from agent_shield.attacks import AttackConfig, list_attack_modules
 from agent_shield.attacks.registry import get_attack_module as _get
 from agent_shield.defenses import PolicyEngine, SandboxExecutor
 from agent_shield.models import AgentTrace, AttackResult
+from agent_shield.observability import render_metrics
 from agent_shield.targets import DEFAULT_TASK, build_local_target
 
 WORKBENCH_HTML = """<!doctype html>
@@ -1155,6 +1156,11 @@ def build_web_app(store=None, session_store=None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
         return WORKBENCH_HTML
+
+    @app.get("/metrics")
+    async def metrics() -> PlainTextResponse:
+        """Prometheus 文本格式指标（与代理的 /metrics 同一注册表）。"""
+        return PlainTextResponse(render_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.get("/api/modules")
     async def modules() -> list[dict]:
