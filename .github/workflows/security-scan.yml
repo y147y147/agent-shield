@@ -38,14 +38,14 @@ jobs:
 
       - name: Upload SARIF to Code Scanning
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: agentshield.sarif
           category: agentshield
 
       - name: Upload privilege-escalation SARIF to Code Scanning
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: agentshield-pe.sarif
           category: agentshield-privilege-escalation
