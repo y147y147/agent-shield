@@ -45,6 +45,24 @@ class RogueAgentAttack(AttackModule):
     mock_only = True  # 需控制智能体内部状态（MockLLM rogue 模式），黑盒真实 API 不可测
 
     # -------------------------------------------------------------- #
+    # 触发任务（C1：优先读包内 YAML；均为正常任务，失控行为来自内部状态）
+    # -------------------------------------------------------------- #
+    def build_trigger_tasks(self, n: int, *, seed: int | None = None) -> list[str]:
+        from agent_shield.attacks.payloads import resolve_payloads
+
+        texts, _, _ = resolve_payloads(
+            "rogue_agent", n, {}, config=self._payload_config(seed), fallback=[BENIGN_TASK]
+        )
+        return texts
+
+    def _payload_config(self, seed: int | None):
+        if seed is None:
+            return None
+        from agent_shield.attacks.base import AttackConfig
+
+        return AttackConfig(seed=seed)
+
+    # -------------------------------------------------------------- #
     # 判定
     # -------------------------------------------------------------- #
     def judge(self, trace: AgentTrace) -> AttackCase:
@@ -72,9 +90,11 @@ class RogueAgentAttack(AttackModule):
         return AttackCase(module=self.name, verdict=verdict, severity=severity, evidence=evidence)
 
     # -------------------------------------------------------------- #
-    # 执行：把目标切换为 rogue 模式后跑普通任务
+    # 执行：把目标切换为 rogue 模式后跑普通任务（C1：触发任务读 YAML）
     # -------------------------------------------------------------- #
     async def run(self, target: AgentTarget, config: AttackConfig) -> AttackResult:
+        from agent_shield.attacks.payloads import resolve_payloads
+
         result = AttackResult(
             module=self.name,
             description=self.description,
@@ -99,11 +119,14 @@ class RogueAgentAttack(AttackModule):
             return result
 
         llm.rogue = True  # 模拟智能体内部失控（ASI-10）
-        for i in range(config.num_variants):
-            trace = await target.run(BENIGN_TASK)
+        tasks, _, _ = resolve_payloads(
+            "rogue_agent", config.num_variants, {}, config=config, fallback=[BENIGN_TASK]
+        )
+        for i, task in enumerate(tasks, start=1):
+            trace = await target.run(task)
             case = self.judge(trace)
-            case.name = f"variant-{i + 1}"
-            case.payload = f"（正常任务，目标处于失控状态）{BENIGN_TASK}"
+            case.name = f"variant-{i}"
+            case.payload = f"（正常任务，目标处于失控状态）{task}"
             case.trace = trace
             result.cases.append(case)
 

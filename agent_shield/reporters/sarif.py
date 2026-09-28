@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_shield import __version__
-from agent_shield.models import AttackResult, AttackVerdict, Severity
+from agent_shield.models import AttackResult, AttackVerdict, Severity, Verification
 
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -111,6 +111,7 @@ def _result_for(result: AttackResult, case, target_name: str, target_artifact: s
             "target": target_name,
             "verdict": case.verdict.value,
             "severity": case.severity.value,
+            "verification": case.verification.value,
             "owasp-asi": result.owasp_asi or "",
             "mitre-atlas": result.atlas_id or "",
             "evidence": list(case.evidence),
@@ -141,6 +142,7 @@ def results_to_sarif(
     sarif_results: list[dict[str, Any]] = []
     total_cases = 0
     successes = 0
+    confirmed = 0
     artifact_uri = _relative_artifact_uri(target_artifact)
 
     for result in results:
@@ -150,8 +152,16 @@ def results_to_sarif(
         total_cases += result.total
         successes += result.successes
         for case in result.cases:
-            if not include_non_success and case.verdict != AttackVerdict.SUCCESS:
-                continue
+            if case.verification == Verification.CONFIRMED:
+                confirmed += 1
+            if not include_non_success:
+                # "复核后确认"优先：复核结论 CONFIRMED 必然输出；未复核（PENDING）的 SUCCESS 按旧逻辑兼容；
+                # 明确复核为 UNCONFIRMED 的"声称成功"发现不再进入默认结果（抑制误报）。
+                include = case.verification == Verification.CONFIRMED or (
+                    case.verification == Verification.PENDING and case.verdict == AttackVerdict.SUCCESS
+                )
+                if not include:
+                    continue
             sarif_results.append(_result_for(result, case, target_name, artifact_uri))
 
     return {
@@ -174,6 +184,7 @@ def results_to_sarif(
                     "modules": len({r.module for r in results}),
                     "cases": total_cases,
                     "successes": successes,
+                    "confirmed": confirmed,
                 },
             }
         ],

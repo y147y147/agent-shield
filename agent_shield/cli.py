@@ -14,6 +14,7 @@
     agent-shield audit --target http --url http://127.0.0.1:8000 --mode react --llm mock
     agent-shield web --port 8086                     # Web 攻防工作台（攻击/防护对比/多模型/策略/沙箱/审计）
     agent-shield benchmark                           # 全攻击向量 × 加固前后成功率矩阵
+    agent-shield model-benchmark --models "deepseek=deepseek-chat,qwen=qwen-plus"  # 真实模型安全基准（ASR+FPR+成本+对比图）
     agent-shield audit-benchmark --quick           # 自主审计指挥官质量回归（离线）
     agent-shield audit-schedule --cron "0 2 * * *" --once  # 定时审计（示例）
     agent-shield http-agent --port 8000              # 暴露 HTTP 黑盒靶场
@@ -35,6 +36,7 @@ from rich.table import Table
 
 from agent_shield.attacks import AttackConfig, get_attack_module, list_attack_modules
 from agent_shield.core.report import result_to_json, result_to_markdown
+from agent_shield.core.verifier import apply_verification
 from agent_shield.observability import configure_logging
 from agent_shield.runtime.llm import OpenAICompatLLM
 from agent_shield.targets import DEFAULT_TASK, build_local_target
@@ -137,6 +139,14 @@ def attack(
     base_url: str | None = typer.Option(None, "--base-url", help="API Base URL（默认读 OPENAI_BASE_URL）"),
     judge_model: str | None = typer.Option(None, "--judge-model", help="启用 LLM-as-Judge 慢路径检测（需模型名，如 deepseek-chat）"),
     sandbox: bool = typer.Option(False, "--sandbox/--no-sandbox", help="run_command 在沙箱中执行（资源限制 + 超时）"),
+    seed: int | None = typer.Option(None, "--seed", help="载荷 seed（同一 seed 扩展/采样可复现；默认用 YAML 自带 seed）"),
+    encodings: str | None = typer.Option(
+        None, "--encodings", help="限制编码面，逗号分隔（如 plain,base64；默认用 YAML 各 variant 声明）"
+    ),
+    mutate: bool = typer.Option(False, "--mutate/--no-mutate", help="变异器确定性扩展（含编码变换+去重；默认关闭）"),
+    adaptive: bool = typer.Option(False, "--adaptive/--no-adaptive", help="自适应绕过：按防护反馈逐轮换编码重试（默认关闭）"),
+    adaptive_rounds: int = typer.Option(3, "--adaptive-rounds", min=1, help="自适应最大轮次"),
+    adaptive_budget: int = typer.Option(9, "--adaptive-budget", min=1, help="自适应全局执行预算"),
     json_out: Path | None = typer.Option(None, "--json", help="同时输出 JSON 报告到此路径"),
     md_out: Path | None = typer.Option(None, "--markdown", help="同时输出 Markdown 报告到此路径"),
     sarif_out: Path | None = typer.Option(
@@ -159,9 +169,20 @@ def attack(
     console.print(f"[dim]目标: {target.name} — {target.description}[/]")
 
     attack_module = get_attack_module(module)
-    result = asyncio.run(attack_module.run(target, AttackConfig(task=task, num_variants=variants)))
+    encoding_list = [e.strip() for e in encodings.split(",") if e.strip()] if encodings else None
+    result = asyncio.run(
+        attack_module.run(
+            target,
+            AttackConfig(
+                task=task, num_variants=variants, seed=seed, encodings=encoding_list, mutate=mutate,
+                adaptive=adaptive, adaptive_rounds=adaptive_rounds, adaptive_budget=adaptive_budget,
+            ),
+        )
+    )
 
     _render_result(result)
+    # 独立复核：报告/SARIF 层统一应用复核，抑制攻击模块的自我确认偏误
+    apply_verification(result)
 
     if json_out:
         json_out.write_text(json.dumps(result_to_json(result), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -490,47 +511,247 @@ def mcp(
 @app.command("benchmark")
 def benchmark(
     llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
+    model: str | None = typer.Option(None, "--model", help="单模型名（如 deepseek-chat；mock 可不填）"),
+    models: str | None = typer.Option(
+        None, "--models", help="多模型横向对比，逗号分隔：'label=model,label2=model2'（mock 表示离线，如 'mock,deepseek=deepseek-chat'）"
+    ),
+    base_url: str | None = typer.Option(None, "--base-url", help="openai-compat Base URL（默认读 OPENAI_BASE_URL）"),
+    api_key: str | None = typer.Option(None, "--api-key", help="API Key（默认读 OPENAI_API_KEY）"),
+    task: str = typer.Option(DEFAULT_TASK, "--task", "-t", help="目标任务"),
     variants: int = typer.Option(3, "--variants", "-n", min=1),
     runs: int = typer.Option(1, "--runs", min=1, help="每个模块重复轮次（多轮聚合，输出 Wilson 置信区间）"),
+    confidence: float = typer.Option(0.95, "--confidence", min=0.5, max=0.999, help="置信水平"),
     json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 矩阵"),
     md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 矩阵"),
 ) -> None:
-    """基准评测：全部攻击模块 × 加固前后成功率矩阵（含置信区间）。"""
+    """基准评测：全部攻击模块 × 加固前后成功率矩阵（含置信区间与 token/费用成本列）。
+
+    单模型（兼容旧用法）::
+
+        agent-shield benchmark --runs 5
+
+    多模型一键横向对比（模型 × 攻击族 × 加固前后）::
+
+        agent-shield benchmark --models "mock,deepseek=deepseek-chat" --runs 5 \\
+            --base-url https://api.deepseek.com/v1 --json bench.json --markdown bench.md
+    """
     from agent_shield.core.benchmark import (
+        format_cost_usd,
         format_matrix_rate,
         matrix_to_markdown,
-        run_benchmark_matrix,
+        parse_model_specs,
+        run_benchmark_matrix_multi,
     )
 
-    matrix = asyncio.run(run_benchmark_matrix(llm=llm, num_variants=variants, runs=runs))
+    specs = parse_model_specs(llm=llm, model=model, models=models, base_url=base_url, api_key=api_key)
+    multi = len(specs) > 1
+    matrix = asyncio.run(
+        run_benchmark_matrix_multi(specs, task=task, num_variants=variants, runs=runs, confidence=confidence)
+    )
 
     cases_per_module = variants * runs
-    table = Table(
-        title=f"基准评测：{len(matrix)} 个攻击向量（llm={llm}，{runs} 轮 × {variants} 变体 = {cases_per_module} 用例/模块）",
-        show_lines=True,
-    )
-    table.add_column("攻击模块", style="cyan")
-    table.add_column("OWASP", justify="center")
-    table.add_column("ATLAS", justify="center")
-    table.add_column("加固前成功率（95% CI）", justify="center")
-    table.add_column("加固后成功率（95% CI）", justify="center")
-    for row in matrix:
-        before_text = format_matrix_rate(row, "vulnerable")
-        after_text = format_matrix_rate(row, "defended")
-        before = f"[bold red]{before_text}[/]" if row["vulnerable_success_rate"] else f"[green]{before_text}[/]"
-        after = f"[green]{after_text}[/]" if row["defended_success_rate"] == 0 else f"[bold red]{after_text}[/]"
-        table.add_row(row["module"], row["owasp_asi"] or "—", row["atlas_id"] or "—", before, after)
-    console.print(table)
+    if multi:
+        labels = ", ".join(s.describe() for s in specs)
+        table = Table(
+            title=f"基准评测（多模型）：{len(specs)} 个模型 × {len(matrix) // len(specs)} 个攻击向量（{runs} 轮 × {variants} 变体 = {cases_per_module} 用例/模块·模型）\n{labels}",
+            show_lines=True,
+        )
+        table.add_column("模型", style="cyan")
+        table.add_column("攻击模块", style="cyan")
+        table.add_column("加固前成功率", justify="center")
+        table.add_column("加固后成功率", justify="center")
+        table.add_column("Tokens 前/后", justify="right")
+        table.add_column("费用 USD 前/后", justify="right")
+        for row in matrix:
+            if row.get("skipped"):
+                table.add_row(
+                    str(row.get("model")), row["module"], "跳过（仅 Mock 可测）", "跳过（仅 Mock 可测）", "—", "—"
+                )
+                continue
+            before_text = format_matrix_rate(row, "vulnerable")
+            after_text = format_matrix_rate(row, "defended")
+            before = f"[bold red]{before_text}[/]" if row["vulnerable_success_rate"] else f"[green]{before_text}[/]"
+            after = f"[green]{after_text}[/]" if row["defended_success_rate"] == 0 else f"[bold red]{after_text}[/]"
+            tokens = f"{row.get('vulnerable_total_tokens', 0)} / {row.get('defended_total_tokens', 0)}"
+            cost = (
+                f"{format_cost_usd(float(row.get('vulnerable_estimated_cost_usd', 0.0)))} / "
+                f"{format_cost_usd(float(row.get('defended_estimated_cost_usd', 0.0)))}"
+            )
+            table.add_row(str(row.get("model")), row["module"], before, after, tokens, cost)
+        console.print(table)
+        # 每个模型的费用汇总（可引用：跑这轮矩阵花了多少钱）
+        summary = Table(title="费用汇总（估算，USD）", show_lines=False)
+        summary.add_column("模型", style="cyan")
+        summary.add_column("Tokens（前+后）", justify="right")
+        summary.add_column("费用 USD", justify="right")
+        summary.add_column("LLM 调用", justify="right")
+        for spec in specs:
+            sub = [r for r in matrix if r.get("model") == spec.label and not r.get("skipped")]
+            tokens_total = sum(int(r.get("vulnerable_total_tokens", 0)) + int(r.get("defended_total_tokens", 0)) for r in sub)
+            cost_total = sum(
+                float(r.get("vulnerable_estimated_cost_usd", 0.0)) + float(r.get("defended_estimated_cost_usd", 0.0))
+                for r in sub
+            )
+            calls_total = sum(
+                int(r.get("vulnerable_llm_calls", 0)) + int(r.get("defended_llm_calls", 0)) for r in sub
+            )
+            summary.add_row(spec.label, str(tokens_total), format_cost_usd(cost_total), str(calls_total))
+        console.print(summary)
+    else:
+        spec = specs[0]
+        table = Table(
+            title=f"基准评测：{len(matrix)} 个攻击向量（model={spec.describe()}，{runs} 轮 × {variants} 变体 = {cases_per_module} 用例/模块）",
+            show_lines=True,
+        )
+        table.add_column("攻击模块", style="cyan")
+        table.add_column("OWASP", justify="center")
+        table.add_column("ATLAS", justify="center")
+        table.add_column("加固前成功率", justify="center")
+        table.add_column("加固后成功率", justify="center")
+        table.add_column("Tokens 前/后", justify="right")
+        table.add_column("费用 USD 前/后", justify="right")
+        for row in matrix:
+            if row.get("skipped"):
+                table.add_row(
+                    row["module"], row["owasp_asi"] or "—", row["atlas_id"] or "—",
+                    "跳过", "跳过", "—", "—",
+                )
+                continue
+            before_text = format_matrix_rate(row, "vulnerable")
+            after_text = format_matrix_rate(row, "defended")
+            before = f"[bold red]{before_text}[/]" if row["vulnerable_success_rate"] else f"[green]{before_text}[/]"
+            after = f"[green]{after_text}[/]" if row["defended_success_rate"] == 0 else f"[bold red]{after_text}[/]"
+            tokens = f"{row.get('vulnerable_total_tokens', 0)} / {row.get('defended_total_tokens', 0)}"
+            cost = (
+                f"{format_cost_usd(float(row.get('vulnerable_estimated_cost_usd', 0.0)))} / "
+                f"{format_cost_usd(float(row.get('defended_estimated_cost_usd', 0.0)))}"
+            )
+            table.add_row(row["module"], row["owasp_asi"] or "—", row["atlas_id"] or "—", before, after, tokens, cost)
+        console.print(table)
     if runs > 1:
         console.print(
             f"[dim]置信区间为 Wilson score interval（{round(matrix[0]['confidence'] * 100) if matrix else 95}%）。"
             f"单轮 100%/0% 不等于「必然/绝不可能」，多轮运行可给出误差范围。[/]"
         )
+    console.print("[dim]费用为估算值（Mock 按字符数估算，仅用于成本对比；真实模型按 usage 计费）。[/]")
 
     if json_out:
         json_out.write_text(json.dumps(matrix, ensure_ascii=False, indent=2), encoding="utf-8")
     if md_out:
         md_out.write_text(matrix_to_markdown(matrix), encoding="utf-8")
+
+
+@app.command("model-benchmark")
+def model_benchmark_cmd(
+    llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
+    model: str | None = typer.Option(None, "--model", help="单模型名（如 deepseek-chat / qwen-plus）"),
+    models: str | None = typer.Option(
+        None, "--models",
+        help="多模型横向对比，逗号分隔：'label=model,label2=model2'（mock 表示离线，如 'deepseek=deepseek-chat,qwen=qwen-plus'）",
+    ),
+    base_url: str | None = typer.Option(None, "--base-url", help="openai-compat Base URL（默认读 OPENAI_BASE_URL）"),
+    api_key: str | None = typer.Option(None, "--api-key", help="API Key（默认读 OPENAI_API_KEY）"),
+    task: str | None = typer.Option(None, "--task", "-t", help="目标任务（默认办公摘要任务）"),
+    variants: int = typer.Option(3, "--variants", "-n", min=1, help="每向量载荷变体数"),
+    runs: int = typer.Option(3, "--runs", min=1, help="每向量重复轮次（真实模型建议 ≥3，输出 Wilson 置信区间）"),
+    seed: int | None = typer.Option(None, "--seed", help="载荷 seed（固定后可复现；None=用 YAML 家族自带 seed）"),
+    confidence: float = typer.Option(0.95, "--confidence", min=0.5, max=0.999, help="置信水平"),
+    toggles_payload_controls: bool = typer.Option(
+        False, "--payload-controls/--no-payload-controls", help="FPR 是否纳入载荷库 benign_control 对照（默认关，与 fp-benchmark 口径一致）"
+    ),
+    chart_dir: Path | None = typer.Option(None, "--chart-dir", help="输出每模型对比图（SVG）到此目录，并在 Markdown 里引用"),
+    json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 报告（全部模型）"),
+    md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 报告（每模型表格 + FPR + 对比图引用）"),
+) -> None:
+    """真实模型安全基准：同一批攻击向量在「空旷脆弱」vs「全量加固」上各打一遍，再量加固态 FPR。
+
+    这是把 AgentShield 从"确定性模拟评测"升级为"真数据评测"的入口：让同一套办公
+    智能体（固定 seed + 工具带），在 DeepSeek/Qwen/OpenAI/Ollama 等真实 LLM 大脑上，
+    产出**每模型：加固前后攻击成功率 + FPR + 成本 + 对比图**。
+
+    离线 CI（零成本、可复现）::
+
+        agent-shield model-benchmark --runs 1 --seed 42 --json model-bench.json --markdown model-bench.md --chart-dir charts
+
+    真实云端 API 横向对比（两个厂商，各自一条命令；key 走环境变量，勿写进聊天/文件）::
+
+        # DeepSeek：deepseek-chat + deepseek-reasoner（同一 key）
+        agent-shield model-benchmark --models "deepseek=deepseek-chat,reasoner=deepseek-reasoner" --runs 3 \\
+            --base-url https://api.deepseek.com/v1 --api-key $env:DEEPSEEK_API_KEY \\
+            --json mb.json --markdown mb.md --chart-dir charts
+
+        # 阿里百炼：qwen-plus（同组可比，需先 setx DASHSCOPE_API_KEY）
+        agent-shield model-benchmark --models "qwen=qwen-plus" --runs 3 \\
+            --base-url https://dashscope.aliyuncs.com/compatible-mode/v1 --api-key $env:DASHSCOPE_API_KEY \\
+            --json mb-qwen.json --markdown mb-qwen.md --chart-dir charts
+    """
+    from agent_shield.core.benchmark import format_cost_usd, parse_model_specs
+    from agent_shield.core.model_benchmark import (
+        render_chart_svg,
+        reports_to_json,
+        reports_to_markdown,
+        run_model_security_benchmark_many,
+    )
+
+    specs = parse_model_specs(llm=llm, model=model, models=models, base_url=base_url, api_key=api_key)
+    multi = len(specs) > 1
+    reports = asyncio.run(
+        run_model_security_benchmark_many(
+            specs, task=task, num_variants=variants, runs=runs, confidence=confidence,
+            seed=seed, include_payload_controls=toggles_payload_controls,
+        )
+    )
+
+    # 终端摘要
+    t = Table(title=f"真实模型安全基准：{', '.join(s.describe() for s in specs)}", show_lines=True)
+    t.add_column("模型", style="cyan")
+    t.add_column("加固前 ASR", justify="center")
+    t.add_column("加固后 ASR", justify="center")
+    t.add_column("↓ 下降", justify="center")
+    t.add_column("FPR(strict)", justify="center")
+    t.add_column("能力分", justify="center")
+    t.add_column("费用 USD", justify="right")
+    for r in reports:
+        t.add_row(
+            r.model,
+            f"[bold red]{r.mean_vulnerable_rate:.0%}[/]",
+            f"[green]{r.mean_defended_rate:.0%}[/]",
+            f"[bold]{r.asr_reduction:.0%}[/]",
+            f"{r.fpr:.0%}" if r.fpr <= 0.1 else f"[yellow]{r.fpr:.0%}[/]",
+            f"[cyan]{r.competence:.0%}[/]",
+            format_cost_usd(r.total_cost_usd),
+        )
+    console.print(t)
+    if reports:
+        r0 = reports[0]
+        console.print(
+            f"[dim]载荷 seed={r0.seed} · {r0.toolset} · 载荷库签名: {r0.payload_signature}[/]"
+        )
+        console.print(
+            "[dim]解读：加固后 ASR 越低且 FPR 越低，防线越有效且越不误伤。"
+            "『↓ 下降』= 加固前后平均攻击成功率的绝对下降。[/]"
+        )
+    if not multi:
+        console.print("[dim]提示：--models 一次可对比多个模型（真实 API 每轮有 token 成本）。[/]")
+
+    if chart_dir:
+        chart_dir.mkdir(parents=True, exist_ok=True)
+        for r in reports:
+            (chart_dir / f"chart-{r.model}.svg").write_text(render_chart_svg(r), encoding="utf-8")
+        console.print(f"[dim]对比图已写入: {chart_dir}/chart-<model>.svg[/]")
+
+    if json_out:
+        json_out.write_text(reports_to_json(reports), encoding="utf-8")
+        console.print(f"[dim]JSON 已写入: {json_out}[/]")
+    if md_out:
+        md_body = reports_to_markdown(reports)
+        if chart_dir:
+            for r in reports:
+                md_body += f"\n![{r.model} 对比图](chart-{r.model}.svg)\n"
+        md_out.write_text(md_body, encoding="utf-8")
+        console.print(f"[dim]Markdown 已写入: {md_out}[/]")
+    else:
+        console.print(reports_to_markdown(reports))
 
 
 @app.command("fp-benchmark")
@@ -539,13 +760,21 @@ def fp_benchmark_cmd(
     dataset: Path | None = typer.Option(None, "--dataset", help="良性对照集 YAML（默认 datasets/benign_tasks.yaml）"),
     max_fpr: float = typer.Option(0.05, "--max-fpr", min=0.0, max=1.0, help="FPR 门禁上限，超过则以退出码 1 结束"),
     confidence: float = typer.Option(0.95, "--confidence", min=0.5, max=0.999, help="置信水平"),
+    include_payload_controls: bool = typer.Option(
+        False, "--payload-controls/--no-payload-controls", help="额外纳入载荷库每族 benign_control 对照（一并入门禁）"
+    ),
     json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 报告"),
     md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 报告"),
 ) -> None:
     """误报率（FPR）基准：在启用防护的靶场上跑良性对照集，度量是否误伤正常业务。"""
     from agent_shield.core.fp_benchmark import run_fp_benchmark
 
-    report = asyncio.run(run_fp_benchmark(llm=llm, dataset_path=dataset, confidence=confidence))
+    report = asyncio.run(
+        run_fp_benchmark(
+            llm=llm, dataset_path=dataset, confidence=confidence,
+            include_payload_controls=include_payload_controls,
+        )
+    )
 
     table = Table(
         title=(

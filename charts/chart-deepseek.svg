@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 522" font-family="Segoe UI, -apple-system, Arial, sans-serif" width="100%">
+<rect width="900" height="522" fill="#ffffff"/>
+<text x="240" y="24" font-size="15" font-weight="700" fill="#111827">AgentShield 真实模型基准 · deepseek
+  （加固前 12% → 加固后 0%，↓ 12%）</text>
+<text x="460" y="42" font-size="12" fill="#6b7280">FPR(strict)=0% · Competence(能力)=81% · 载荷 seed=42 · office-1</text>
+<text x="228" y="55" font-size="11" text-anchor="end" fill="#374151">data exfiltration</text>
+<rect x="240" y="42" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="52" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="50" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="64" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="89" font-size="11" text-anchor="end" fill="#374151">indirect injection</text>
+<rect x="240" y="76" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="86" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="84" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="98" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="123" font-size="11" text-anchor="end" fill="#374151">direct injection</text>
+<rect x="240" y="110" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="120" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="118" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="132" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="157" font-size="11" text-anchor="end" fill="#374151">human trust exploitati</text>
+<rect x="240" y="144" width="333" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="154" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="579" y="152" font-size="10" fill="#dc2626">67%</text>
+<text x="246" y="166" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="191" font-size="11" text-anchor="end" fill="#374151">inter agent communicat</text>
+<rect x="240" y="178" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="188" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="186" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="200" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="225" font-size="11" text-anchor="end" fill="#374151">mcp poisoning</text>
+<rect x="240" y="212" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="222" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="220" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="234" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="259" font-size="11" text-anchor="end" fill="#374151">memory poisoning</text>
+<rect x="240" y="246" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="256" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="254" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="268" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="293" font-size="11" text-anchor="end" fill="#374151">privilege escalation</text>
+<rect x="240" y="280" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="290" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="288" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="302" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="327" font-size="11" text-anchor="end" fill="#374151">resource abuse</text>
+<rect x="240" y="314" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="324" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="322" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="336" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="361" font-size="11" text-anchor="end" fill="#374151">rogue agent</text>
+<line x1="240" y1="363" x2="420" y2="363" stroke="#d1d5db" stroke-width="2"/>
+<text x="428" y="367" font-size="10" fill="#9ca3af">skip</text>
+<text x="228" y="395" font-size="11" text-anchor="end" fill="#374151">tool poisoning</text>
+<rect x="240" y="382" width="333" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="392" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="579" y="390" font-size="10" fill="#dc2626">67%</text>
+<text x="246" y="404" font-size="10" fill="#16a34a">0%</text>
+<text x="228" y="429" font-size="11" text-anchor="end" fill="#374151">unexpected code execut</text>
+<rect x="240" y="416" width="0" height="12" rx="2" fill="#dc2626"/>
+<rect x="240" y="426" width="0" height="12" rx="2" fill="#16a34a"/>
+<text x="246" y="424" font-size="10" fill="#dc2626">0%</text>
+<text x="246" y="438" font-size="10" fill="#16a34a">0%</text>
+<text x="240" y="470" font-size="10" fill="#6b7280">■ 加固前(脆弱)攻击成功率</text><text x="400" y="470" font-size="10" fill="#16a34a">■ 加固后(有防御)攻击成功率</text><text x="660" y="470" font-size="10" fill="#6b7280">加固后每条向量跑 3×1 用例（95% Wilson CI）</text>
+</svg>

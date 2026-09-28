@@ -37,9 +37,13 @@ LLM 智能体（Agent）通过**工具调用**获得了"行动能力"，也带�
 | 🖥 Web 攻防工作台 | 攻防 / 多模型对比 / 策略测试 / 沙箱测试 / 自动审计 / 审计记录，零前端依赖，浏览器即用 |
 | 🧱 HTTP 黑盒靶场 | 把脆弱靶场暴露为 HTTP 服务，任意客户端黑盒测试；Docker 一键起服务 |
 | 🤝 MCP 支持 | 审计 MCP server 暴露的工具、把 MCP 工具接入防护链、模拟 MCP 投毒攻击 |
-| 📉 误报率（FPR）门禁 | 良性业务任务对照集 + `fp-benchmark --max-fpr`：既看"拦住了多少攻击"，也看"误伤了多少正常业务" |
+| 📉 误报率（FPR）门禁 | 良性业务任务对照集 + `fp-benchmark --max-fpr`：既看"拦住了多少攻击"，也看"误伤了多少正常业务"；另含 **near-miss 脱敏后完成率**——即使某条业务文本触发了脱敏，也量化"任务还能不能正常做完" |
 | 🧱 逃逸边界透明化 | 沙箱逃逸用例套件 v0 + [逃逸矩阵文档](docs/sandbox-escape-matrix.md)：明确写出能挡 19 类、挡不住 8 类 |
+| 🛡 行为层防御 | ASI-06/07/08/10：记忆库写入拦截（防持久注入）+ 读回脱敏、智能体间通道净化（来源校验 + 指令脱敏）、独立复核、编排自主性上限 |
+| 🧪 长程持久化剧情 | 跨 3 轮"延迟触发"实验：注入在记忆/通道边界即被净化，第 3 轮回读无存活指令故触发失败；带"关闭防护必触发"对照 |
+| 🔩 安全边界绕过自检 | 针对安全管道 / Windows 标志 / 路径归一化的对抗用例套件，防线改动后跑一遍确认没被绕过（`test_policy_bypass.py`） |
 | 📈 可观测性 | 结构化 JSON 日志 + Prometheus `GET /metrics`（代理与工作台），零依赖，可直接接 Grafana/SIEM |
+| 🎯 真实模型基准 | `model-benchmark`：同一套办公智能体在真实 LLM（DeepSeek/Qwen/OpenAI/Ollama）上，`加固前/后 ASR + FPR + 成本 + SVG 对比图`，固定 seed 可复现，离线 mock 零成本验证管道 |
 | 🧪 自动化测试 | 攻防闭环 / 代理 / MCP / 沙箱 / 语义策略 / Web 工作台全覆盖，全部离线可跑，CI 同款 |
 
 ## 快速开始
@@ -136,8 +140,21 @@ agent-shield attack --llm openai-compat --model qwen2.5:7b \
 agent-shield benchmark                 # 12 攻击向量 × 加固前后成功率（Mock：100% → 0%）
 agent-shield benchmark --runs 5        # 每模块跑 5 轮：输出成功率 + 95% Wilson 置信区间
 agent-shield benchmark --runs 5 --markdown bench.md --json bench.json   # 导出报告
-# 注：当前 benchmark 为离线 Mock 矩阵；单模块打真实模型用 attack（见上节）
-# 多模型聚合基准在路线图中（--llm openai-compat 横向对比）
+agent-shield benchmark --models "mock,deepseek=deepseek-chat"  # 多模型横向对比
+
+# 真实模型安全基准（Model Security Benchmark）：同一套办公智能体在真实 LLM 大脑上，
+# "空旷脆弱 vs 全量加固"各扛一遍同一批攻击，再量加固态 FPR，产出每模型对比图
+#（离线 CI 用 mock 是零成本 + 可复现；真实 API 建议 --runs 3+ 才有置信度）
+agent-shield model-benchmark --runs 1 --seed 42 --json mb.json --markdown mb.md --chart-dir charts   # 离线
+# 真实云端 API（key 走环境变量 setx DEEPSEEK_API_KEY / DASHSCOPE_API_KEY，勿写进聊天/文件）
+agent-shield model-benchmark --models "deepseek=deepseek-chat,reasoner=deepseek-reasoner" --runs 3 \
+    --base-url https://api.deepseek.com/v1 --api-key $env:DEEPSEEK_API_KEY \
+    --json mb.json --markdown mb.md --chart-dir charts
+agent-shield model-benchmark --models "qwen=qwen-plus" --runs 3 \
+    --base-url https://dashscope.aliyuncs.com/compatible-mode/v1 --api-key $env:DASHSCOPE_API_KEY \
+    --json mb-qwen.json --markdown mb-qwen.md --chart-dir charts
+# 产出：每模型 "加固前/后 攻击成功率 + FPR(strict) + 能力分(Competence) + 成本 + SVG 对比图" + 可复现记录
+#（seed + 载荷库版本签名 + 工具带版本）。离线 mock 跑管道是对的：加固后 ASR→0%、FPR→0%。
 
 # 自主审计"指挥官"质量回归（离线）：改 Prompt 后跑此命令可检测退化
 agent-shield audit-benchmark --quick
@@ -331,11 +348,17 @@ ruff check .       # 静态检查（CI 同款）
 agent-shield fp-benchmark --max-fpr 0.05        # FPR 超阈值 → 退出码 1
 agent-shield fp-benchmark --json fpr.json --markdown fpr.md
 
-# 2) 沙箱逃逸边界：19 类已拦截 / 8 类 v0 明确挡不住（含策略层兜底）
+# 2) 长程持久化剧情（B2）：跨 3 轮的"延迟触发"攻击是否被边界挡死
+pytest -q tests/test_persistence_campaign.py     # 注入在记忆/通道边界被净化，第 3 轮回读无存活指令；含"关闭防护必触发"对照
+
+# 3) 安全边界绕过自检（A1）：防线改动后确认没被打穿
+pytest -q tests/test_policy_bypass.py            # 安全管道 / Windows 标志 / 路径归一化 对抗用例
+
+# 4) 沙箱逃逸边界：19 类已拦截 / 8 类 v0 明确挡不住（含策略层兜底）
 pytest -q tests/test_sandbox_escape.py
 # 边界矩阵（含 v1.0 强隔离验收标准）：docs/sandbox-escape-matrix.md
 
-# 3) 可观测性：结构化日志 + Prometheus 指标
+# 5) 可观测性：结构化日志 + Prometheus 指标
 agent-shield --log-level INFO --log-format json attack -m indirect_injection   # 单行 JSON 日志
 agent-shield proxy --port 8090 --mock-upstream   # 然后 GET http://127.0.0.1:8090/metrics
 agent-shield web --port 8086                     # 然后 GET http://127.0.0.1:8086/metrics

@@ -62,12 +62,27 @@ class AgentRuntime:
         messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]
         trace = AgentTrace(task=task)
         started = time.perf_counter()
+        # D1：LLM 用量累计（token / 费用 / 调用次数），写入 trace 供 benchmark 聚合
+        prompt_tokens = completion_tokens = total_tokens = 0
+        estimated_cost_usd = 0.0
+        llm_calls = 0
+        model_label = getattr(self.llm, "model", None) or getattr(self.llm, "name", "")
         self._emit({"type": "user", "text": task})
 
         try:
             for _ in range(self.max_steps):
                 resp = await self.llm.chat(messages, self.tools.all())
                 step = TraceStep(messages=list(messages))
+                llm_calls += 1
+                prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd = self._accumulate_usage(
+                    resp,
+                    messages,
+                    model_label,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost_usd,
+                )
 
                 # 过程链：模型思考/决策 + 文本回复
                 reasoning = resp.reasoning or getattr(self.llm, "last_decision", "") or None
@@ -122,6 +137,11 @@ class AgentRuntime:
             self._emit({"type": "error", "text": trace.final_answer})
 
         trace.duration_ms = int((time.perf_counter() - started) * 1000)
+        trace.prompt_tokens = prompt_tokens
+        trace.completion_tokens = completion_tokens
+        trace.total_tokens = total_tokens
+        trace.estimated_cost_usd = round(estimated_cost_usd, 6)
+        trace.llm_calls = llm_calls
         return trace
 
     # ------------------------------------------------------------------ #
@@ -162,3 +182,37 @@ class AgentRuntime:
         for guard in self.guardrails:
             output = await guard.sanitize_tool_output(call, output)
         return output
+
+    @staticmethod
+    def _accumulate_usage(
+        resp,
+        messages: list[ChatMessage],
+        model_label: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        estimated_cost_usd: float,
+    ) -> tuple[int, int, int, float]:
+        """累计一次 LLM 调用的用量：有 usage 用真实值，无 usage（Mock）用字符数估算。"""
+        usage = getattr(resp, "usage", None)
+        if isinstance(usage, dict) and (usage.get("prompt_tokens") or usage.get("total_tokens")):
+            prompt = int(usage.get("prompt_tokens") or 0)
+            completion = int(usage.get("completion_tokens") or 0)
+            total = int(usage.get("total_tokens") or 0) or (prompt + completion)
+        else:
+            # MockLLM 无 usage：prompt≈输入字符数/4，completion 固定小值（仅成本对比展示用）
+            prompt = max(1, sum(len(m.content or "") for m in messages) // 4)
+            completion = 20
+            total = prompt + completion
+        prompt_tokens += prompt
+        completion_tokens += completion
+        total_tokens += total
+        try:
+            from agent_shield.orchestrator.usage import LLMUsage, estimate_cost_usd
+
+            estimated_cost_usd += estimate_cost_usd(
+                str(model_label or ""), LLMUsage(prompt, completion, total)
+            )
+        except Exception:  # noqa: BLE001 —— 费用估算失败不影响主流程
+            pass
+        return prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd

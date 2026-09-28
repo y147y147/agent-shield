@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent_shield.core.verifier import apply_verification
 from agent_shield.models import AttackResult
 
 
@@ -10,6 +11,7 @@ from agent_shield.models import AttackResult
 # --------------------------------------------------------------------------- #
 def result_to_json(result: AttackResult) -> dict:
     """序列化为 JSON 友好的 dict（不含超长载荷，可加 --full 展开）。"""
+    apply_verification(result)
     return {
         "summary": result.summary(),
         "cases": [
@@ -17,6 +19,8 @@ def result_to_json(result: AttackResult) -> dict:
                 "name": c.name,
                 "verdict": c.verdict.value,
                 "severity": c.severity.value,
+                "verification": c.verification.value,
+                "verify_note": c.verify_note,
                 "evidence": c.evidence,
                 "trace_duration_ms": c.trace.duration_ms if c.trace else None,
                 "tool_calls": [
@@ -32,6 +36,7 @@ def result_to_json(result: AttackResult) -> dict:
 # Markdown
 # --------------------------------------------------------------------------- #
 def result_to_markdown(result: AttackResult) -> str:
+    apply_verification(result)
     lines = [
         f"# Attack Report: `{result.module}`",
         "",
@@ -49,13 +54,14 @@ def result_to_markdown(result: AttackResult) -> str:
         f"| 被拦截 | {result.blocked} |",
         f"| 未生效 | {result.failed} |",
         f"| 成功率 | {result.success_rate:.1%} |",
+        f"| 复核后确认 | {result.confirmed} |",
         "",
         "## Cases",
         "",
-        "| # | 判定 | 严重度 | 证据 |",
-        "| --- | --- | --- | --- |",
+        "| # | 判定 | 复核 | 严重度 | 证据 |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for i, c in enumerate(result.cases, start=1):
         evidence = "; ".join(c.evidence) or "—"
-        lines.append(f"| {i} | {c.verdict.value} | {c.severity.value} | {evidence} |")
+        lines.append(f"| {i} | {c.verdict.value} | {c.verification.value} | {c.severity.value} | {evidence} |")
     return "\n".join(lines) + "\n"

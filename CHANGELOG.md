@@ -15,6 +15,27 @@
 
 ### Added
 
+- **版本化载荷库 C1 全覆盖 + 变异器 C2 + 自适应 C3**（`agent_shield/payloads/`
+  + `agent_shield/payloads/data/*.yaml` × 12 + `agent_shield/attacks/payloads.py`
+  + `agent_shield/attacks/adaptive.py` + `docs/payload-library.md`）：
+  - 12 族全覆盖（`indirect/direct_injection`、`data_exfiltration`、`privilege_escalation`、
+    `tool/mcp_poisoning`、`unexpected_code_execution`、`memory_poisoning`、
+    `inter_agent_communication`、`resource_abuse`、`human_trust_exploitation`、`rogue_agent`），
+    占位符模板化（`{marker}/{email}/{script}/{tool}` 等），`id/version/mapping/channel/seed` 版本化，
+    同一 `seed` 下扩展/采样可复现；缺文件/异常回退内置；
+  - `AttackConfig` 新增顶层 `seed/encodings/mutate/adaptive/adaptive_rounds/adaptive_budget`
+   （`params` 同名字段兼容编排层透传）；CLI `attack` 新增
+    `--seed/--encodings/--mutate/--adaptive/--adaptive-rounds/--adaptive-budget`；
+  - 变异器 6 种编码变换（`plain/base64/fullwidth-colon/zero-width/html-entity/unicode-homoglyph`）
+    确定性扩展去重；默认只取 plain（与旧硬编码行为一致）；
+  - 每族 `benign_control` 良性对照（`severity: info`，id 保留家族来源）经
+    `payload_benign_tasks` 聚合，`run_fp_benchmark(include_payload_controls=True)` /
+    `fp-benchmark --payload-controls` 一并计入 strict 门禁（默认关闭，旧门禁不变）；
+  - 自适应绕过（试点 `indirect_injection`）：`resolve_baseline_with_meta` 基线 +
+    防护反馈分类（detector 升级编码 / policy 换同族下一模板 plain / other 爬梯子），
+    每条最多 `rounds` 轮、全局最多 `budget` 次，同一 seed 可复现，
+    case 命名 `adaptive-r{round}-{i}` 并附 `编码=/来源=` 证据。
+  - 测试：`tests/test_payload_library.py`（12 用例）、`tests/test_adaptive_bypass.py`（9 用例）。
 - **SARIF 2.1.0 报告器**（`agent_shield/reporters/sarif.py`）：攻击结果可直接进 GitHub
   Code Scanning 与任何 SARIF 消费平台；新增 CLI 选项 `agent-shield attack --sarif out.sarif`。
 - **`--no-fail-on-finding`**：CI 中先收集报告而不让流水线失败（默认仍为发现漏洞时退出码 1）。
@@ -36,7 +57,7 @@
   Issue/PR 模板、`.github/dependabot.yml`。
 - 测试：`tests/test_policy_fail_closed.py`、`tests/test_sarif.py`、`tests/test_stats.py`、
   `tests/test_benchmark_runs.py`、`tests/test_observability.py`、`tests/test_sandbox_escape.py`、
-  `tests/test_fp_benchmark.py`。
+  `tests/test_fp_benchmark.py`、`tests/test_payload_library.py`、`tests/test_adaptive_bypass.py`。
 
 ### Fixed
 

@@ -11,7 +11,7 @@ class CallBudgetGuard(GuardRail):
 
     name = "call_budget"
 
-    def __init__(self, max_calls: int = 8):
+    def __init__(self, max_calls: int = 16):
         self.max_calls = max_calls
         self._count = 0
 

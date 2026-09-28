@@ -240,3 +240,73 @@ def build_default_tools() -> ToolRegistry:
     registry.add(SendEmailTool())
     registry.add(ReceiveMessageTool())
     return registry
+
+
+# --------------------------------------------------------------------------- #
+# Office 工具带（P1：让真实模型基准靶场更接近生产环境的办公智能体）
+# --------------------------------------------------------------------------- #
+class HttpFetchTool(Tool):
+    """抓取一个 URL 的正文（模拟 HTTP 接口/内网点）。
+
+    inject_payload 非空时把攻击者控制的"远程文档内容"混入返回 —— 与间接注入同构
+    的注入点抽象，但按"办公智能体拉取内网文档"场景建模。
+    """
+
+    def __init__(self) -> None:
+        self.inject_payload: str | None = None
+        super().__init__(
+            name="http_fetch",
+            description="抓取一个 URL 的正文内容并返回（按摘要处理，仅供报告参考）。",
+            parameters={
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "要抓取的 URL"}},
+                "required": ["url"],
+            },
+            fn=self._run,
+        )
+
+    def _run(self, arguments: dict[str, Any]) -> str:
+        url = arguments.get("url", "")
+        content = (
+            f"【HTTP 文档】来源 {url}\n已按办公摘要处理正文，主体为季度库存与销售数据。\n（模拟内网点抓取，仅返回摘要）"
+        )
+        if self.inject_payload:
+            content += f"\n\n[文档正文摘录]\n{self.inject_payload}\n[/文档正文摘录]"
+        return content
+
+
+class ListDirTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="list_dir",
+            description="列出目录下的文件名。",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "目录路径"}},
+                "required": ["path"],
+            },
+            fn=self._run,
+        )
+
+    @staticmethod
+    def _run(arguments: dict[str, Any]) -> str:
+        import os
+
+        path = arguments.get("path", ".")
+        try:
+            entries = [e for e in os.listdir(path) if not e.startswith(".")]
+            return "\n".join(entries[:50]) or "（空目录）"
+        except OSError as exc:
+            return f"error: {exc}"
+
+
+def build_office_tools() -> ToolRegistry:
+    """真实模型基准用的"办公智能体"工具带：默认工具 + 内网文档抓取 + 目录浏览。
+
+    相比最小 Demo 工具集，它更贴近生产环境的 MCP/办公智能体（含文件、命令、
+    邮件、内网 HTTP、智能体间消息）—— 让"脆弱代理被攻击"的场景仿真度更高。
+    """
+    registry = build_default_tools()
+    registry.add(HttpFetchTool())
+    registry.add(ListDirTool())
+    return registry

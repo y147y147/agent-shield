@@ -75,6 +75,13 @@ class AgentTrace(BaseModel):
     duration_ms: int = 0
     steps: list[TraceStep] = Field(default_factory=list)
     final_answer: str | None = None
+    # E3/D1：LLM 用量聚合（token / 估算费用），由 AgentRuntime.run 累计写入。
+    # Mock 靶场无真实 usage 时为估算值（prompt≈字符数/4），仅用于成本对比展示。
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    llm_calls: int = 0
 
     def all_tool_calls(self) -> list[ToolCall]:
         return [tc for step in self.steps for tc in step.tool_calls]
@@ -134,6 +141,14 @@ class AttackVerdict(str, Enum):
     FAILED = "failed"  # 攻击未生效
 
 
+class Verification(str, Enum):
+    """独立复核状态：攻击模块判定 SUCCESS 后，由确定性 verifier 复核漏洞是否真实落地。"""
+
+    PENDING = "pending"  # 未复核（非 SUCCESS 发现不进入复核）
+    CONFIRMED = "confirmed"  # 复核确认：危险动作确实被执行
+    UNCONFIRMED = "unconfirmed"  # 复核未确认：无观测到的 exploit 落地（疑似误报/被防御）
+
+
 class AttackCase(BaseModel):
     """一次攻击尝试（一个载荷变体对目标的一次执行）。"""
 
@@ -144,6 +159,9 @@ class AttackCase(BaseModel):
     severity: Severity = Severity.INFO
     evidence: list[str] = Field(default_factory=list)
     trace: AgentTrace | None = None
+    # E 复核：独立 verifier 对 SUCCESS 发现的复核结论与备注
+    verification: Verification = Verification.PENDING
+    verify_note: str = ""
 
 
 class AttackResult(BaseModel):
@@ -175,6 +193,16 @@ class AttackResult(BaseModel):
     @property
     def success_rate(self) -> float:
         return self.successes / self.total if self.total else 0.0
+
+    @property
+    def confirmed(self) -> int:
+        """复核确认（verification==CONFIRMED）的用例数。"""
+        return sum(1 for c in self.cases if c.verification == Verification.CONFIRMED)
+
+    @property
+    def confirmation_rate(self) -> float:
+        """复核确认率：confirmed / total（未复核的用例不参与）。"""
+        return self.confirmed / self.total if self.total else 0.0
 
     @property
     def criticals(self) -> int:

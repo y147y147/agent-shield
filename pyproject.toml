@@ -45,6 +45,7 @@ agent-shield = "agent_shield.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_shield"]
+artifacts = ["agent_shield/payloads/data/*.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

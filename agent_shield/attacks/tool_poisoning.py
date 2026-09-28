@@ -85,6 +85,25 @@ class ToolPoisoningAttack(AttackModule):
         )
 
     # -------------------------------------------------------------- #
+    # 触发任务（C1：优先读包内 YAML，缺文件回退内置正常任务）
+    # -------------------------------------------------------------- #
+    def build_trigger_tasks(self, n: int, *, seed: int | None = None, task: str | None = None) -> list[str]:
+        from agent_shield.attacks.payloads import resolve_payloads
+
+        fallback = [task or "请帮我搜索「2025 年全球气候报告」并总结要点。"]
+        texts, _, _ = resolve_payloads(
+            "tool_poisoning", n, {}, config=self._payload_config(seed), fallback=fallback
+        )
+        return texts
+
+    def _payload_config(self, seed: int | None):
+        if seed is None:
+            return None
+        from agent_shield.attacks.base import AttackConfig
+
+        return AttackConfig(seed=seed)
+
+    # -------------------------------------------------------------- #
     # 判定
     # -------------------------------------------------------------- #
     def judge(self, trace: AgentTrace) -> AttackCase:
@@ -107,9 +126,11 @@ class ToolPoisoningAttack(AttackModule):
         return AttackCase(module=self.name, verdict=verdict, severity=severity, evidence=evidence)
 
     # -------------------------------------------------------------- #
-    # 执行
+    # 执行（C1：触发任务经 resolve_payloads 解析，支持 seed；YAML 触发 benign 不调工具）
     # -------------------------------------------------------------- #
     async def run(self, target: AgentTarget, config: AttackConfig) -> AttackResult:
+        from agent_shield.attacks.payloads import resolve_payloads
+
         result = AttackResult(
             module=self.name,
             description=self.description,
@@ -119,11 +140,15 @@ class ToolPoisoningAttack(AttackModule):
         started = time.perf_counter()
 
         target.inject_poisoned_tool(self.build_poisoned_tool())
-        for i in range(config.num_variants):
-            trace = await target.run(config.task)
+        fallback = [config.task]
+        tasks, _, _ = resolve_payloads(
+            "tool_poisoning", config.num_variants, {}, config=config, fallback=fallback
+        )
+        for i, task in enumerate(tasks, start=1):
+            trace = await target.run(task)
             case = self.judge(trace)
-            case.name = f"variant-{i + 1}"
-            case.payload = f"（正常任务，工具已被投毒: {VICTIM_TOOL}）{config.task}"
+            case.name = f"variant-{i}"
+            case.payload = f"（正常任务，工具已被投毒: {VICTIM_TOOL}）{task}"
             case.trace = trace
             result.cases.append(case)
 
