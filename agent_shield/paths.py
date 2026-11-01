@@ -50,3 +50,8 @@ def user_data_dir() -> Path:
 def default_session_db_path() -> Path:
     """自主审计会话 SQLite 默认路径。"""
     return user_data_dir() / "audit_sessions.db"
+
+
+def default_attack_mem_path() -> Path:
+    """攻击指纹记忆库 SQLite 默认路径（WAF 式黑名单，见 Phase 1 / ws_b）。"""
+    return user_data_dir() / "attack_mem.db"

@@ -37,6 +37,7 @@ DASHBOARD_HTML = """<!doctype html>
   <tbody></tbody>
 </table>
 <script>
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function load() {
   const res = await fetch('/api/events?n=200');
   const data = await res.json();
@@ -44,16 +45,16 @@ async function load() {
   const counts = data.summary || {};
   document.getElementById('mode').textContent = '(自动刷新 5s)';
   document.getElementById('stats').innerHTML = Object.entries(counts)
-    .map(([k, v]) => `<div class="card"><b>${v}</b><span>${k}</span></div>`).join('') ||
+    .map(([k, v]) => `<div class="card"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('') ||
     '<div class="card"><b>0</b><span>events</span></div>';
   const rows = evts.map(e => {
     const dets = e.detections ? JSON.parse(e.detections || '[]') : [];
     const badge = dets.length ? `<span class="badge b-block">${dets.length} 条注入信号</span>` : '';
     const t = new Date(e.ts * 1000).toLocaleString();
     return `<tr>
-      <td>${t}</td><td>${e.direction}</td><td>${e.model || '-'}</td>
-      <td><span class="badge b-${e.action}">${e.action}</span></td>
-      <td>${badge || '-'}</td><td class="danger">${(dets[0]?.snippet || e.detail || '').slice(0, 120)}</td>
+      <td>${esc(t)}</td><td>${esc(e.direction)}</td><td>${esc(e.model || '-')}</td>
+      <td><span class="badge b-${esc(e.action)}">${esc(e.action)}</span></td>
+      <td>${badge || '-'}</td><td class="danger">${esc((dets[0]?.snippet || e.detail || '').slice(0, 120))}</td>
     </tr>`;
   }).join('');
   document.querySelector('#events tbody').innerHTML = rows || '<tr><td colspan="6">暂无事件</td></tr>';

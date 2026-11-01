@@ -16,6 +16,7 @@ pytest-cache-files-*/
 .coverage
 htmlcov/
 .basetmp/
+.trae/
 
 # OS
 .DS_Store
@@ -26,5 +27,7 @@ htmlcov/
 
 # Runtime artifacts
 *.db
+*.db-*
 *.sqlite
+*.sqlite-*
 *.sqlite3

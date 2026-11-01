@@ -1,0 +1,33 @@
+name: Publish to PyPI
+
+# 打 v* tag 时把当前版本发布到 PyPI。
+# 使用 GitHub "Trusted Publishing"（OIDC）——CI 里不含任何明文 token，
+# 在 PyPI 项目设置里把该仓库的发布权限授权给本 workflow 即可。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  # 只需读内容 + 用 OIDC 换取 PyPI 短期令牌
+  contents: read
+  id-token: write  # trusted publishing 关键权限
+
+jobs:
+  build-and-publish:
+    name: Build & publish sdist+wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: pip install --upgrade build
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

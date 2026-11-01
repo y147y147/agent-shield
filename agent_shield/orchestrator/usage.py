@@ -76,15 +76,14 @@ def estimate_tokens_from_messages(messages: list[ChatMessage]) -> int:
 
 
 def estimate_cost_usd(model: str, usage: LLMUsage) -> float:
-    """粗算费用（USD）；未知模型按通用单价。"""
-    m = (model or "").lower()
-    if "gpt-4" in m:
-        inp, out = 0.03, 0.06
-    elif "deepseek" in m:
-        inp, out = 0.00014, 0.00028
-    else:
-        inp, out = 0.001, 0.002
-    return (usage.prompt_tokens * inp + usage.completion_tokens * out) / 1000.0
+    """粗算费用（USD）；未知模型按通用单价。
+
+    M5：单价表统一收敛到 ``agent_shield.budget``（PRICING 内置表 + set_pricing 可配置），
+    数值与旧三档完全一致，避免回归。
+    """
+    from agent_shield.budget import estimate_cost_usd as _budget_estimate
+
+    return _budget_estimate(model, usage.prompt_tokens, usage.completion_tokens)
 
 
 class UsageTrackingPlanner:

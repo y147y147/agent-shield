@@ -137,6 +137,20 @@ def format_cost_usd(cost: float) -> str:
     return text or "$0"
 
 
+def defense_blockable_modules() -> list[str]:
+    """已知防线**可拦截**的模块名（排除已确认的防线盲区向量）。
+
+    防线盲区向量（``defense_blind_spot=True``，如 workspace_exfiltration）的攻击
+    路径落在防线允许集内或走无守卫通道，加固后 ASR 仍可能 > 0 —— 基准评测的
+    "加固后全部 0%"不变量只对可拦截模块成立，盲区向量如实上报其真实成功率。
+    """
+    return [
+        name
+        for name, _desc in list_attack_modules()
+        if not get_attack_module(name).defense_blind_spot
+    ]
+
+
 async def run_benchmark(
     llm: str = "mock",
     defense: bool = False,

@@ -44,9 +44,18 @@ class InjectionDetector(GuardRail):
 
     name = "injection_detector"
 
-    def __init__(self, sanitize: bool = True):
+    def __init__(self, sanitize: bool = True, memory=None, signals=None):
         self.sanitize = sanitize
-        self._compiled = [(re.compile(pattern, re.IGNORECASE), desc, sev) for pattern, desc, sev in SIGNALS]
+        self.memory = memory  # 可选 AttackMemory：命中历史攻击指纹的载荷走快路径拦截
+        # 可注入的信号集（WS-E 弱防护用它"去掉 INSTRUCTION: 信号"来模拟规则放宽/懒防御）
+        raw = list(signals) if signals is not None else list(SIGNALS)
+        self._compiled = [(re.compile(pattern, re.IGNORECASE), desc, sev) for pattern, desc, sev in raw]
+
+    def memory_hit(self, text: str) -> str | None:
+        """快路径：text 中是否命中攻击指纹记忆库中的已知载荷（返回该载荷）。"""
+        if self.memory is None or not text:
+            return None
+        return self.memory.known_in(text)
 
     def detect(self, text: str) -> list[Detection]:
         findings: list[Detection] = []
@@ -61,9 +70,15 @@ class InjectionDetector(GuardRail):
         return findings
 
     def sanitize_text(self, text: str) -> str:
-        """纯函数：把命中信号的行替换为脱敏标记（运行时与 MITM 代理共用）。"""
+        """纯函数：把命中信号的行替换为脱敏标记（运行时与 MITM 代理共用）。
+
+        攻击指纹记忆库快路径优先：若整段文本命中库中已知攻击载荷（说明这是
+        历史命中过的攻击，即使本轮基准规则未覆盖），整体脱敏不放行。
+        """
         if not self.sanitize:
             return text
+        if self.memory_hit(text) is not None:
+            return "[REDACTED by AgentShield: 攻击指纹记忆命中]"
         findings = self.detect(text)
         if not findings:
             return text

@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from agent_shield.cli import app
 from agent_shield.core.benchmark import (
+    defense_blockable_modules,
     format_matrix_rate,
     matrix_to_markdown,
     run_benchmark,
@@ -36,7 +37,9 @@ async def test_run_benchmark_aggregates_multiple_runs():
 
 async def test_run_benchmark_defended_reports_zero_with_ci():
     rows = await run_benchmark(llm="mock", defense=True, num_variants=2, runs=3)
-    for row in rows:
+    blockable = [r for r in rows if r["module"] in defense_blockable_modules()]
+    assert blockable, "应至少有一个可拦截模块"
+    for row in blockable:
         assert row["success_rate"] == 0.0
         assert row["ci_low"] == 0.0
         assert 0.0 < row["ci_high"] < 1.0, "0/6 的置信上界应大于 0（不宜断言「绝不可能」）"

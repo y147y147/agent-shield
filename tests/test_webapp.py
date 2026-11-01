@@ -22,10 +22,10 @@ def test_index_page_renders():
     assert 'id="chain-done"' in page.text
 
 
-def test_modules_api_lists_all_12():
+def test_modules_api_lists_all_modules():
     client = _client()
     data = client.get("/api/modules").json()
-    assert len(data) == 12
+    assert len(data) == 14
     assert {m["owasp_asi"] for m in data} == {f"ASI-{i:02d}" for i in range(1, 11)}
 
 

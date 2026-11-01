@@ -1,0 +1,18 @@
+# AgentShield provider 配置（WS-D）。
+# 用 `--provider <name>` 一键切换真实模型端点 / 离线 mock（见 docs/plan-v2.md）。
+# 密钥一律走环境变量（api_key_env），绝不写明文到本文件。
+
+[provider.mock]
+llm = "mock"
+
+[provider.deepseek]
+llm = "openai-compat"
+model = "deepseek-chat"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[provider.qwen]
+llm = "openai-compat"
+model = "qwen-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "QWEN_API_KEY"

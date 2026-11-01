@@ -1,4 +1,4 @@
-"""攻击模块：12 个攻击向量（覆盖 OWASP ASI-01 ~ ASI-10 全部 10 类风险，ASI-04 含工具投毒与 MCP 投毒两个变体）+ 注册表。"""
+"""攻击模块：14 个攻击向量（覆盖 OWASP ASI-01 ~ ASI-10 全部 10 类风险，ASI-02 含数据外发与工作目录窃取两个变体，ASI-04 含工具投毒与 MCP 投毒两个变体，ASI-09 含人机信任利用与工具冒充两个变体）+ 注册表。"""
 
 from agent_shield.attacks.base import AttackConfig, AttackModule
 from agent_shield.attacks.data_exfiltration import ATTACKER_EMAIL, DataExfiltrationAttack
@@ -13,8 +13,19 @@ from agent_shield.attacks.privilege_escalation import PrivilegeEscalationAttack
 from agent_shield.attacks.registry import get_attack_module, list_attack_modules, register
 from agent_shield.attacks.resource_abuse import LOOP_THRESHOLD, ResourceAbuseAttack
 from agent_shield.attacks.rogue_agent import RogueAgentAttack
+from agent_shield.attacks.tool_impersonation import (
+    IMP_EXFIL_EMAIL,
+    IMP_MARKER_CMD,
+    IMP_SECRET_PATH,
+    ToolImpersonationAttack,
+)
 from agent_shield.attacks.tool_poisoning import VICTIM_TOOL, ToolPoisoningAttack
 from agent_shield.attacks.unexpected_code_execution import UnexpectedCodeExecutionAttack
+from agent_shield.attacks.workspace_exfiltration import (
+    SECRET_MARKER,
+    SECRET_NAMES,
+    WorkspaceExfiltrationAttack,
+)
 
 __all__ = [
     "ATTACKER_EMAIL",
@@ -22,12 +33,17 @@ __all__ = [
     "DEFAULT_MCP_TOOL",
     "LOOP_THRESHOLD",
     "PE_SENSITIVE_READ",
+    "SECRET_MARKER",
+    "SECRET_NAMES",
     "VICTIM_TOOL",
     "AttackConfig",
     "AttackModule",
     "DataExfiltrationAttack",
     "DirectInjectionAttack",
     "HumanTrustExploitationAttack",
+    "IMP_EXFIL_EMAIL",
+    "IMP_MARKER_CMD",
+    "IMP_SECRET_PATH",
     "IndirectInjectionAttack",
     "InterAgentCommunicationAttack",
     "MCPPoisoningAttack",
@@ -35,8 +51,10 @@ __all__ = [
     "PrivilegeEscalationAttack",
     "ResourceAbuseAttack",
     "RogueAgentAttack",
+    "ToolImpersonationAttack",
     "ToolPoisoningAttack",
     "UnexpectedCodeExecutionAttack",
+    "WorkspaceExfiltrationAttack",
     "get_attack_module",
     "list_attack_modules",
     "register",

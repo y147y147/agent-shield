@@ -7,6 +7,7 @@ import logging
 import time
 
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
+from agent_shield.defenses.intent_classifier import INTENT_BLOCKED_PREFIX
 from agent_shield.models import AgentTrace, BlockedCall, ChatMessage, ToolCall, TraceStep
 from agent_shield.observability import GUARDRAIL_LATENCY, TOOL_CALLS, get_logger, log_event
 from agent_shield.runtime.llm import LLMClient
@@ -59,8 +60,17 @@ class AgentRuntime:
         for guard in self.guardrails:
             guard.reset()
 
-        messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]
         trace = AgentTrace(task=task)
+        # M2：意图识别分类器命中（请求进主模型前被前置过滤拦截）→ 标记 intent_flag，
+        # 且不把清洗后占位文本喂给主模型（请求整体拦截，能力分不受误伤）。
+        if user_content.startswith(INTENT_BLOCKED_PREFIX):
+            trace.intent_flag = True
+            trace.final_answer = f"（请求已被意图分类器拦截：{user_content}）"
+            trace.duration_ms = 0
+            self._emit({"type": "intent_blocked", "text": user_content})
+            return trace
+
+        messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]
         started = time.perf_counter()
         # D1：LLM 用量累计（token / 费用 / 调用次数），写入 trace 供 benchmark 聚合
         prompt_tokens = completion_tokens = total_tokens = 0
@@ -92,10 +102,16 @@ class AgentRuntime:
                     self._emit({"type": "llm", "text": resp.content})
 
                 if not resp.tool_calls:
-                    step.final_answer = resp.content or ""
+                    final_text, blocked_reason = await self._sanitize_final(resp.content or "")
+                    step.final_answer = final_text
                     trace.steps.append(step)
-                    trace.final_answer = resp.content
-                    self._emit({"type": "final", "text": resp.content or ""})
+                    trace.final_answer = final_text
+                    if blocked_reason:
+                        trace.final_blocked = True
+                        trace.final_block_reason = blocked_reason
+                        self._emit({"type": "final_blocked", "reason": blocked_reason})
+                    else:
+                        self._emit({"type": "final", "text": final_text})
                     break
 
                 # 1) 回传 assistant 消息（含 tool_calls，OpenAI 协议要求）
@@ -130,7 +146,11 @@ class AgentRuntime:
                 trace.steps.append(step)
             else:
                 # 达到最大步数仍未结束
-                trace.final_answer = trace.final_answer or "(agent reached max steps)"
+                final_text, blocked_reason = await self._sanitize_final(trace.final_answer or "(agent reached max steps)")
+                trace.final_answer = final_text
+                if blocked_reason:
+                    trace.final_blocked = True
+                    trace.final_block_reason = blocked_reason
                 self._emit({"type": "final", "text": trace.final_answer})
         except Exception as exc:  # noqa: BLE001 —— 保持轨迹完整，便于审计
             trace.final_answer = f"(agent error: {exc})"
@@ -182,6 +202,14 @@ class AgentRuntime:
         for guard in self.guardrails:
             output = await guard.sanitize_tool_output(call, output)
         return output
+
+    async def _sanitize_final(self, text: str) -> tuple[str, str | None]:
+        """最终答复经输出守卫（第四钩子）清洗；拦截返回 (清洗后文本, 原因)。"""
+        for guard in self.guardrails:
+            text, reason = await guard.sanitize_final_output(text)
+            if reason is not None:
+                return text, reason
+        return text, None
 
     @staticmethod
     def _accumulate_usage(

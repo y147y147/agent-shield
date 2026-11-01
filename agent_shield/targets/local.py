@@ -9,7 +9,9 @@ from __future__ import annotations
 from agent_shield.defenses import (
     AutonomyGuard,
     CallBudgetGuard,
+    FinalAnswerGuard,
     InjectionDetector,
+    IntentClassifier,
     InterAgentChannelGuard,
     LLMJudgeDetector,
     MemoryIntegrityGuard,
@@ -83,6 +85,9 @@ def build_local_target(
     audit_store=None,
     sandbox: bool = False,
     event_sink=None,
+    attack_memory=None,
+    adaptive_supervisor=None,
+    intent_classifier: IntentClassifier | None = None,
 ) -> LocalAgentTarget:
     """构建 Demo 靶场目标。
 
@@ -92,14 +97,20 @@ def build_local_target(
     - judge_llm：额外挂载 LLM-as-Judge 慢路径检测器（与规则检测互补）；
     - audit_store：可选，每次工具调用写入审计日志；
     - sandbox=True（或 defense=True）：run_command 在沙箱中执行（资源限制 + 超时 + 固定工作目录）；
-    - event_sink：可选，实时过程链事件回调（用户输入/模型决策/工具调用/输出/拦截/最终答复）。
+    - event_sink：可选，实时过程链事件回调（用户输入/模型决策/工具调用/输出/拦截/最终答复）；
+    - adaptive_supervisor：可选的 WS-C 自适应监督器，无论 defense 开关都会挂载（只升不降）。
+    - intent_classifier：可选的 M2 意图识别分类器，**显式传入**才挂载（请求进主模型前的前置过滤，
+      命中即整体拦截并标记 trace.intent_flag；默认不挂以保持现有攻防基线口径，FPR 门禁后置）。
     """
     llm_client = _build_llm(llm, model=model, api_key=api_key, base_url=base_url)
     registry = tools or build_default_tools()
     guardrails = []
     if defense:
-        guardrails.append(InjectionDetector(sanitize=True))
+        # 攻击指纹记忆库（可选）：历史命中过的载荷快路径拦截，基准规则放宽也兜底
+        guardrails.append(InjectionDetector(sanitize=True, memory=attack_memory))
         guardrails.append(PolicyEngine())
+        # 最终答复输出守卫（第四钩子）：敏感信息泄露拦截（workspace_exfiltration 盲区闭环）
+        guardrails.append(FinalAnswerGuard())
         # 给 verbose 推理模型（deepseek-reasoner）适度余量：它常单任务 16~24 次调用。
         # 上限仍存在（真阳性"失控"仍会被刹停），仅放宽额度——唯一的轻微 ASI 权衡点。
         guardrails.append(CallBudgetGuard(max_calls=24))
@@ -113,6 +124,13 @@ def build_local_target(
         guardrails.append(InterAgentChannelGuard(audit_store=audit_store))
         if judge_llm is not None:
             guardrails.append(LLMJudgeDetector(judge_llm))
+    if adaptive_supervisor is not None:
+        # WS-C 自适应监督器：无论 defense 开关都挂载（只升不降），挂在注入检测之后
+        guardrails.append(adaptive_supervisor)
+    if intent_classifier is not None:
+        # M2 意图识别分类器：请求进主模型前的入口过滤，挂到守卫**首位**（先于 InjectionDetector）。
+        # 命中即 sanitize_user_input 返回拦截标记，runtime 短路口整体拦截并置 trace.intent_flag。
+        guardrails.insert(0, intent_classifier)
     if sandbox or defense:
         # 沙箱执行：命令在受限环境运行（ASI-05/ASI-08 对策）
         cmd_tool = registry.get("run_command")

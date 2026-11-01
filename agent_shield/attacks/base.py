@@ -64,6 +64,10 @@ class AttackModule(ABC):
     # 需要控制智能体内部状态才能模拟的攻击（如 ASI-10 内部失控）：
     # 对黑盒真实 API 模型不可测，仅在本地 Mock 靶场生效。
     mock_only: bool = False
+    # 已知防线盲区：攻击路径落在防线"允许集"内（如工作目录内读取）或
+    # 走无守卫的通道（如 final_answer），加固后 ASR 仍可能 > 0。
+    # 基准评测据此把"加固后全 0"的断言只作用于可拦截模块（如实报告盲区）。
+    defense_blind_spot: bool = False
 
     @abstractmethod
     async def run(self, target: AgentTarget, config: AttackConfig) -> AttackResult:

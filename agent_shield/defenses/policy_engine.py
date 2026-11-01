@@ -311,6 +311,12 @@ class PolicyEngine(GuardRail):
                 for token in tokens[1:]:
                     if not _looks_like_path(token):
                         continue  # 选项（-l、/s）、模式（grep foo）等非路径参数
+                    # 敏感文件最小权限：命中敏感名模式（凭据/密钥类）即拒绝，根目录内也不放行
+                    if _is_sensitive_path(token):
+                        return ToolCallDecision(
+                            allowed=False,
+                            reason=f"denied by semantic policy: path {token!r} is a sensitive file",
+                        )
                     if not self._path_allowed(token, roots):
                         return ToolCallDecision(
                             allowed=False,
@@ -324,6 +330,12 @@ class PolicyEngine(GuardRail):
         path = str(call.arguments.get("path", ""))
         if not path:
             return ToolCallDecision(allowed=False, reason="denied by semantic policy: missing path")
+        # 敏感文件最小权限：命中敏感名模式（凭据/密钥类）即拒绝，根目录内也不放行
+        if _is_sensitive_path(path):
+            return ToolCallDecision(
+                allowed=False,
+                reason=f"denied by semantic policy: path {path!r} is a sensitive file",
+            )
         roots = semantic.get("allowed_roots") or []
         if not self._path_allowed(path, roots):
             return ToolCallDecision(
@@ -354,6 +366,42 @@ class PolicyEngine(GuardRail):
 # 的写法会被误放行（如 `/etc`、`/bin`），所以这里收紧为「≤2 位短字母数字」或「带连字符如 /a-d」，
 # 带冒号的（/C:...）或含多余斜杠的（/c/Users/...）一律仍按路径检查，防误放行。
 _WIN_FLAG_RE = re.compile(r"^/(?:[A-Za-z0-9]{1,2}|[A-Za-z0-9]+-[A-Za-z0-9]+)$") if os.name == "nt" else None
+
+
+# 安全的敏感文件名模式：凭据 / 密钥 / 私钥 / 令牌类文件（大小写不敏感）。
+# 无论路径是否在 allowed_roots 内，命中即拒绝读/写/cat —— 工作目录不应承载
+# 敏感数据（workspace_exfiltration 盲区闭环：允许集内放行的前提是内容不敏感）。
+# 模式刻意保守，避免误伤良性任务（如 "demo.txt"、"report.md" 均不命中）。
+SENSITIVE_NAME_PATTERNS: tuple[str, ...] = (
+    r"\.env$",
+    r"credentials[._-]?(?:json|txt|yaml|yml)?$",
+    r"secrets?[._-]?(?:txt|json|yaml|yml)?$",
+    r"\.git[-_]credentials$",
+    r"id_rsa$",
+    r"id_ed25519$",
+    r"id_dsa$",
+    r"id_ecdsa$",
+    r"\.pem$",
+    r"\.key$",
+    r"\.pgp$",
+    r"\.gnupg$",
+    r"(?:api|auth|access)[._-]?key[s]?$",
+    r"token[s]?[._-]?(?:txt|json|yaml)?$",
+    r"\.aws[/\\]?credentials$",
+    r"\.ssh[/\\]?config$",
+)
+_SENSITIVE_NAME_RE = re.compile("|".join(SENSITIVE_NAME_PATTERNS), re.IGNORECASE)
+
+
+def _is_sensitive_path(path: str) -> bool:
+    """文件名（或整条路径）命中敏感模式即视为敏感，禁止访问。
+
+    同时检查 basename 与归一化后的全路径：覆盖 ``.env``、``credentials.json``
+    等裸文件名，也覆盖 ``.aws/credentials``、``.ssh/config`` 等子目录形态。
+    """
+    norm = path.replace("\\", "/") if os.name == "nt" else path
+    basename = norm.rsplit("/", 1)[-1]
+    return bool(_SENSITIVE_NAME_RE.search(basename) or _SENSITIVE_NAME_RE.search(norm))
 
 
 def _looks_like_path(token: str) -> bool:

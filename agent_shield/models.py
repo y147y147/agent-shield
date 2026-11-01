@@ -75,6 +75,10 @@ class AgentTrace(BaseModel):
     duration_ms: int = 0
     steps: list[TraceStep] = Field(default_factory=list)
     final_answer: str | None = None
+    # E4：最终答复是否被输出守卫（sanitize_final_output 钩子，如 FinalAnswerGuard）
+    # 拦截。拦截后 final_answer 存**清洗后**文本，原敏感内容不再出现在输出端。
+    final_blocked: bool = False
+    final_block_reason: str | None = None
     # E3/D1：LLM 用量聚合（token / 估算费用），由 AgentRuntime.run 累计写入。
     # Mock 靶场无真实 usage 时为估算值（prompt≈字符数/4），仅用于成本对比展示。
     prompt_tokens: int = 0
@@ -82,6 +86,8 @@ class AgentTrace(BaseModel):
     total_tokens: int = 0
     estimated_cost_usd: float = 0.0
     llm_calls: int = 0
+    # M2：意图识别分类器命中标记（请求进主模型前被前置过滤拦截的来源）。
+    intent_flag: bool = False
 
     def all_tool_calls(self) -> list[ToolCall]:
         return [tc for step in self.steps for tc in step.tool_calls]

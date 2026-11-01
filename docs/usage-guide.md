@@ -41,7 +41,7 @@ source .venv/bin/activate        # 激活自带虚拟环境
 ## 2. 10 秒上手
 
 ```bash
-agent-shield modules        # 列出 12 个攻击模块（ASI-01~10，ASI-04 含工具/MCP 两个投毒变体）
+agent-shield modules        # 列出 14 个攻击模块（ASI-01~10，ASI-02/04/09 各含两个变体）
 agent-shield demo           # 攻防对比演示：先打脆弱靶场 → 再上防护重跑
 agent-shield benchmark      # 全模块 × 加固前后成功率矩阵（100% → 0%）
 ```

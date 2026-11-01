@@ -78,7 +78,7 @@ agent-shield attack --llm openai-compat --model qwen2.5:7b \
 ## 基准评测（一键矩阵）
 
 ```bash
-agent-shield benchmark                 # 12 个攻击向量（ASI-01~10 全覆盖）× 加固前后成功率（Mock 离线矩阵）
+agent-shield benchmark                 # 14 个攻击向量（ASI-01~10 全覆盖）× 加固前后成功率（Mock 离线矩阵）
 agent-shield benchmark --runs 5        # 每模块 5 轮：成功率 + Wilson 95% 置信区间（单轮 100%/0% 不等于结论）
 agent-shield benchmark --runs 5 --markdown bench.md --json bench.json
 # 注：benchmark 暂为离线 Mock 矩阵；打真实模型用单模块 attack（见上）

@@ -4,13 +4,14 @@
 > （2025-12-09 发布，ASI01–ASI10）；ATLAS 编号为近似映射，发布前请对照
 > [MITRE ATLAS](https://atlas.mitre.org/) 核对最新 ID。
 
-## 当前实现（12 个攻击向量，覆盖 ASI-01 ~ ASI-10 全部 10 类风险）
+## 当前实现（14 个攻击向量，覆盖 ASI-01 ~ ASI-10 全部 10 类风险）
 
 | 攻击向量 | 模块名 | OWASP ASI（官方名称） | MITRE ATLAS | 状态 |
 | --- | --- | --- | --- | --- |
 | 间接 Prompt 注入（目标劫持） | `indirect_injection` | ASI-01（Agent Goal Hijack，注入通道=工具输出） | AML.T0011.002（Poisoned AI Agent Tool，近似） | ✅ |
 | 直接 Prompt 注入（目标劫持） | `direct_injection` | ASI-01（Agent Goal Hijack，注入通道=用户输入） | AML.T0051（Prompt Injection，近似） | ✅ |
 | 数据窃取（工具误用） | `data_exfiltration` | ASI-02（Tool Misuse：合法工具越权用途调用→外发副作用） | AML.C0054（Exfiltration via Remote Poisoned MCP Tool，近似） | ✅ |
+| 工作目录敏感文件窃取（工具误用） | `workspace_exfiltration` | ASI-02（Tool Misuse：读取工作目录内敏感文件→经最终答复外泄） | — | ✅ |
 | 越权访问（身份/权限滥用） | `privilege_escalation` | ASI-03（Identity & Privilege Abuse） | AML.T0053（AI Agent Tool Invocation） | ✅ |
 | 工具/MCP 投毒（供应链，工具通道） | `tool_poisoning` | ASI-04（Agentic Supply Chain Vulnerabilities） | AML.T0104（Publish Poisoned AI Agent Tool） | ✅ |
 | MCP 投毒（供应链，MCP 通道） | `mcp_poisoning` | ASI-04（Agentic Supply Chain Vulnerabilities） | AML.T0104（Publish Poisoned AI Agent Tool，近似） | ✅ |
@@ -19,9 +20,12 @@
 | 不安全的智能体间通信 | `inter_agent_communication` | ASI-07（Insecure Inter-Agent Communication） | — | ✅ |
 | 资源滥用 / 级联故障 | `resource_abuse` | ASI-08（Cascading Failures：异常输出→失控调用链） | AML.T0029（Resource Hijacking，近似） | ✅ |
 | 人机信任利用 | `human_trust_exploitation` | ASI-09（Human-Agent Trust Exploitation） | — | ✅ |
+| 工具冒充（工具能力边界） | `tool_impersonation` | ASI-09（Human-Agent Trust Exploitation：权威口吻冒充"工具已升级"，诱导调用真实高危工具） | — | ✅ |
 | 失控智能体（内部威胁） | `rogue_agent` | ASI-10（Rogue Agents） | — | ✅ |
 
-一键验证（`agent-shield benchmark`）：全部向量加固前 100% 成功 → 加固后 0%。
+一键验证（`agent-shield benchmark`）：加固前全部 100% 成功 → 加固后**全部 14 个向量 0%**。
+
+历史盲区（已闭环）：`workspace_exfiltration` 曾实证"允许集内读取 + `final_answer` 无守卫"的防线盲区（加固后 ASR 仍 100%）；2026-10-11 通过第四钩子 `sanitize_final_output`（`FinalAnswerGuard` 泄敏拦截）+ 敏感文件最小权限（`allowed_roots` 内敏感名仍拒绝）关闭，详见 `docs/phase4-report.md` 4.2/4.3。
 
 ## 与现有工具的关系
 

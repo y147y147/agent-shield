@@ -16,7 +16,8 @@ from agent_shield.models import ToolCall
 from agent_shield.paths import demo_workdir
 
 _WD = str(demo_workdir()).replace("\\", "/")
-_SECRET = f"{_WD}/secret.txt"  # 位于根内，正常应 ALLOW
+_SECRET = f"{_WD}/secret.txt"  # 位于根内但命中敏感名（凭据类）→ 应 DENY
+_BENIGN = f"{_WD}/notes.txt"  # 位于根内的普通文件 → 应 ALLOW
 _OUTSIDE = "C:/Windows/System32/config/sam"  # 越界，应 DENY
 
 
@@ -48,7 +49,7 @@ def _path(tool: str, path: str):
 # ------------------------------------------------------------------ 安全管道
 class TestSafePipe:
     def test_readonly_pipe_inside_roots_allowed(self):
-        assert _run(f"type {_SECRET} | findstr 词").allowed is True
+        assert _run(f"type {_BENIGN} | findstr 词").allowed is True
 
     def test_exfil_pipe_sink_denied(self):
         # | mail —— 外发目标命令不在白名单 → 必拒
@@ -117,8 +118,13 @@ class TestPathTraversal:
         assert _path("write_file", _WD + "/ok.txt").allowed is True
 
     def test_within_root_allowed(self):
-        assert _path("read_file", _SECRET).allowed is True
-        assert _run(f"cat {_SECRET}").allowed is True
+        assert _path("read_file", _BENIGN).allowed is True
+        assert _run(f"cat {_BENIGN}").allowed is True
+
+    def test_sensitive_name_in_root_denied(self):
+        # 允许集盲区闭环：即使位于 allowed_roots 内，敏感文件（凭据/密钥）一律拒绝
+        assert _path("read_file", _SECRET).allowed is False
+        assert _run(f"cat {_SECRET}").allowed is False
 
     def test_missing_rel_to_root_denied(self):
         # 相对路径无根可依（run_command 的工作目录未归一化到根内）→ 不该被静默放行

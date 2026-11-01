@@ -140,6 +140,10 @@ class ToolPoisoningAttack(AttackModule):
         started = time.perf_counter()
 
         target.inject_poisoned_tool(self.build_poisoned_tool())
+        # LangChain 靶场：执行器构建时已快照工具带，投毒需重建后才对模型可见
+        # （启动期供应链投毒语义：恶意依赖先于启动替换工具定义）。
+        if hasattr(target, "rebuild_tools"):
+            await target.rebuild_tools()
         fallback = [config.task]
         tasks, _, _ = resolve_payloads(
             "tool_poisoning", config.num_variants, {}, config=config, fallback=fallback

@@ -4,7 +4,12 @@ import httpx
 from fastapi.testclient import TestClient
 
 from agent_shield.attacks import AttackConfig
-from agent_shield.core.benchmark import matrix_to_markdown, run_benchmark, run_benchmark_matrix
+from agent_shield.core.benchmark import (
+    defense_blockable_modules,
+    matrix_to_markdown,
+    run_benchmark,
+    run_benchmark_matrix,
+)
 from agent_shield.dashboard import build_dashboard_app
 from agent_shield.proxy.audit import AuditStore
 from agent_shield.serve import build_http_agent_app
@@ -33,7 +38,8 @@ async def test_benchmark_vulnerable_all_success():
 
 async def test_benchmark_defended_all_blocked():
     rows = await run_benchmark(llm="mock", defense=True, num_variants=2)
-    assert all(r["success_rate"] == 0.0 for r in rows)
+    blockable = [r for r in rows if r["module"] in defense_blockable_modules()]
+    assert all(r["success_rate"] == 0.0 for r in blockable)
 
 
 async def test_benchmark_matrix_and_markdown():
@@ -41,7 +47,8 @@ async def test_benchmark_matrix_and_markdown():
     assert len(matrix) >= 7
     md = matrix_to_markdown(matrix)
     assert "AgentShield 基准评测" in md
-    assert all(row["defended_success_rate"] == 0.0 for row in matrix)
+    blockable = [row for row in matrix if row["module"] in defense_blockable_modules()]
+    assert all(row["defended_success_rate"] == 0.0 for row in blockable)
 
 
 # --------------------------------------------------------------------------- #

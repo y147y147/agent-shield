@@ -27,9 +27,9 @@ runner = CliRunner()
 # --------------------------------------------------------------------------- #
 # 全覆盖
 # --------------------------------------------------------------------------- #
-def test_all_twelve_modules_have_yaml_and_builders_use_it():
+def test_all_modules_have_yaml_and_builders_use_it():
     lib = get_library()
-    assert len(lib.modules()) == 12
+    assert len(lib.modules()) == 14
     # 每个模块 run/build 入口经 YAML 解析：seed 可复现
     indirect = IndirectInjectionAttack(marker_command="touch /tmp/z1")
     assert indirect.build_variants(5, seed=7) == indirect.build_variants(5, seed=7)

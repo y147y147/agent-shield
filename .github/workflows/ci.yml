@@ -45,6 +45,12 @@ jobs:
       - name: False-positive benchmark (benign control set gate)
         run: agent-shield fp-benchmark --max-fpr 0.05
 
+      - name: Community-benchmark (AgentDojo attack templates gate)
+        run: agent-shield community-benchmark --max-asr 0.3
+
+      - name: Red-team gate (Phase1 regression + Phase2 decision gate + FPR; non-zero exit on fail)
+        run: agent-shield gate
+
       - name: Test
         run: pytest -q
 

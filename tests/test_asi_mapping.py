@@ -15,6 +15,7 @@ EXPECTED_MAPPING = {
     "indirect_injection": "ASI-01",
     "direct_injection": "ASI-01",
     "data_exfiltration": "ASI-02",
+    "workspace_exfiltration": "ASI-02",
     "privilege_escalation": "ASI-03",
     "tool_poisoning": "ASI-04",
     "mcp_poisoning": "ASI-04",
@@ -23,6 +24,7 @@ EXPECTED_MAPPING = {
     "inter_agent_communication": "ASI-07",
     "resource_abuse": "ASI-08",
     "human_trust_exploitation": "ASI-09",
+    "tool_impersonation": "ASI-09",
     "rogue_agent": "ASI-10",
 }
 
