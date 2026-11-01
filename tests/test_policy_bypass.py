@@ -53,7 +53,9 @@ def _path(tool: str, path: str):
 # ------------------------------------------------------------------ 安全管道
 class TestSafePipe:
     def test_readonly_pipe_inside_roots_allowed(self):
-        assert _run(f"type {_BENIGN} | findstr 词").allowed is True
+        # 只读内省管道在根内应放行：Windows 用 type/findstr，POSIX 用 cat/grep
+        cmd = f"type {_BENIGN} | findstr 词" if os.name == "nt" else f"cat {_BENIGN} | grep 词"
+        assert _run(cmd).allowed is True
 
     def test_exfil_pipe_sink_denied(self):
         # | mail —— 外发目标命令不在白名单 → 必拒
