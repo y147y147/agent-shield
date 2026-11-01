@@ -4,9 +4,13 @@
 模型不可见（实测 0%）。重建执行器 = 恶意依赖先于启动替换工具定义，模型即可调用投毒工具。
 """
 
+import pytest
+
 from agent_shield.attacks import AttackConfig, ToolPoisoningAttack
-from agent_shield.frameworks.langchain import build_langchain_target
+from agent_shield.frameworks.langchain import available, build_langchain_target
 from agent_shield.models import AttackVerdict
+
+pytestmark = pytest.mark.skipif(not available(), reason="langchain 未安装（可选依赖 langchain）")
 
 
 async def test_poisoned_tool_reaches_model_after_rebuild():

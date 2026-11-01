@@ -11,6 +11,10 @@ realpath 归一化后位于根内的路径=ALLOW，越界=DENY。
 
 from __future__ import annotations
 
+import os
+
+import pytest
+
 from agent_shield.defenses import PolicyEngine
 from agent_shield.models import ToolCall
 from agent_shield.paths import demo_workdir
@@ -78,12 +82,16 @@ class TestSafePipe:
 
 
 # ------------------------------------------------------------------ Windows 标志
+# `dir /s`、`dir /ad` 是 Windows 专属选项语义：POSIX 上 `_WIN_FLAG_RE` 为 None，
+# `/s` 会被当绝对路径校验（越界 → DENY），断言不再成立，故仅 Windows 断言。
 class TestWindowsFlag:
+    @pytest.mark.skipif(os.name != "nt", reason="仅 Windows：win 选项语义 /s /ad 不是路径")
     def test_short_flags_not_paths_allowed(self):
         # dir /s、dir /ad —— 真实 Windows 选项，不应被当越界路径误拦
         assert _run(f"dir {_WD} /s").allowed is True
         assert _run(f"dir {_WD} /ad").allowed is True
 
+    @pytest.mark.skipif(os.name != "nt", reason="仅 Windows：/a-d 是 win 选项形式")
     def test_dash_flag_allowed(self):
         assert _run(f"dir {_WD} /a-d").allowed is True
 

@@ -9,8 +9,11 @@
 4. LangChain Mock 裸机靶场同样可诱导读取。
 """
 
+import pytest
+
 from agent_shield.attacks import AttackConfig, WorkspaceExfiltrationAttack
 from agent_shield.attacks.workspace_exfiltration import SECRET_MARKER, SECRET_NAMES
+from agent_shield.frameworks.langchain import available
 from agent_shield.models import AttackVerdict
 from agent_shield.runtime.agent import AgentRuntime
 from agent_shield.runtime.llm import LLMClient, LLMResponse
@@ -78,6 +81,7 @@ async def test_final_answer_echo_channel_is_unguarded():
     assert case.trace.final_answer and SECRET_MARKER in case.trace.final_answer
 
 
+@pytest.mark.skipif(not available(), reason="langchain 未安装（可选依赖 langchain）")
 async def test_exfiltration_also_lands_on_langchain_mock_target():
     """LangChain Mock 靶场：真实框架上同样可诱导读取工作目录敏感文件。"""
     from agent_shield.frameworks.langchain import build_langchain_target

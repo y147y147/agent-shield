@@ -9,6 +9,8 @@
 6. 策略单元：工作目录内 credentials.json 拒绝读取（允许集内也不放行），普通文件放行。
 """
 
+import pytest
+
 from agent_shield.attacks import AttackConfig, WorkspaceExfiltrationAttack
 from agent_shield.attacks.workspace_exfiltration import SECRET_MARKER
 from agent_shield.defenses.final_answer_guard import (
@@ -17,6 +19,7 @@ from agent_shield.defenses.final_answer_guard import (
     FinalAnswerGuard,
 )
 from agent_shield.defenses.policy_engine import PolicyEngine
+from agent_shield.frameworks.langchain import available
 from agent_shield.models import AttackVerdict, ToolCall
 from agent_shield.paths import demo_file
 from agent_shield.runtime.agent import AgentRuntime
@@ -100,6 +103,7 @@ async def test_defended_benign_final_not_blocked():
     assert "未发现异常" in (trace.final_answer or "")
 
 
+@pytest.mark.skipif(not available(), reason="langchain 未安装（可选依赖 langchain）")
 async def test_defended_langchain_mock_all_blocked():
     """LangChain Mock 加固靶场：敏感文件策略拦截 read_file/cat → 全 BLOCKED。"""
     from agent_shield.frameworks.langchain import build_langchain_target

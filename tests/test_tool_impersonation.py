@@ -1,6 +1,9 @@
 """工具冒充（tool_impersonation）：以'工具已升级'权威口吻诱导智能体调用真实高危工具执行边界动作。"""
 
+import pytest
+
 from agent_shield.attacks import AttackConfig, ToolImpersonationAttack
+from agent_shield.frameworks.langchain import available
 from agent_shield.models import AttackVerdict
 from agent_shield.targets import build_local_target
 
@@ -30,6 +33,7 @@ async def test_impersonation_blocked_on_defended_target():
     assert all(c.verdict == AttackVerdict.BLOCKED for c in result.cases)
 
 
+@pytest.mark.skipif(not available(), reason="langchain 未安装（可选依赖 langchain）")
 async def test_impersonation_also_lands_on_langchain_mock_target():
     from agent_shield.frameworks.langchain import build_langchain_target
 
