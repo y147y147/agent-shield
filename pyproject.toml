@@ -39,12 +39,14 @@ dev = [
     # （2026-09 事故：CI 装到 0.16.7，默认规则新增 I/UP/DTZ 等 → 33 个报错）
     "ruff>=0.16,<0.17",
 ]
-# Phase 4（真实框架适配）：LangChain。非硬依赖 —— 未装时 `import agent_shield`
-# 照常可用，相关 target/测试自动跳过。装法：`pip install "agent-shield[langchain]"`
+# 真实框架适配：LangChain v1 create_agent（底层 LangGraph）。非硬依赖 —— 未装时
+# `import agent_shield` 照常可用，相关 target/测试自动跳过。
+# 装法：`pip install "agent-shield[langchain]"` / `uv pip install -e ".[langchain]"`
 langchain = [
-    "langchain>=0.3,<1",
-    "langchain-core>=0.3,<1",
-    "langchain-openai>=0.2,<1",
+    "langchain>=1.0,<2",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=0.3,<2",
+    "langgraph>=1.0,<2",
 ]
 
 [project.scripts]

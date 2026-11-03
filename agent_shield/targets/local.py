@@ -15,7 +15,9 @@ from agent_shield.defenses import (
     InterAgentChannelGuard,
     LLMJudgeDetector,
     MemoryIntegrityGuard,
+    PathNormalizeGuard,
     PolicyEngine,
+    TaintTracker,
     ToolIntegrityGuard,
 )
 from agent_shield.models import AgentTrace
@@ -106,8 +108,16 @@ def build_local_target(
     registry = tools or build_default_tools()
     guardrails = []
     if defense:
+        # 污点跟踪挂最前：sanitize_user_input 须看见原始用户输入（框架+敏感动作），
+        # check_tool_call 也须在策略拒绝源调用之前置污点，从而拦住同批写汇。
+        guardrails.append(TaintTracker())
         # 攻击指纹记忆库（可选）：历史命中过的载荷快路径拦截，基准规则放宽也兜底
+        # （含去混淆 + 不可信工具输出通道扫描）
         guardrails.append(InjectionDetector(sanitize=True, memory=attack_memory))
+        # 工具输出通道意图补位：只扫 web_search/receive_message/http_fetch，不做入口过滤（控 FPR）
+        guardrails.append(IntentClassifier(entry_filter=False, scan_tool_output=True))
+        # 路径归一化在策略之前：把 /c/Users 改写成宿主路径，压真实模型 FPR
+        guardrails.append(PathNormalizeGuard())
         guardrails.append(PolicyEngine())
         # 最终答复输出守卫（第四钩子）：敏感信息泄露拦截（workspace_exfiltration 盲区闭环）
         guardrails.append(FinalAnswerGuard())
@@ -128,7 +138,7 @@ def build_local_target(
         # WS-C 自适应监督器：无论 defense 开关都挂载（只升不降），挂在注入检测之后
         guardrails.append(adaptive_supervisor)
     if intent_classifier is not None:
-        # M2 意图识别分类器：请求进主模型前的入口过滤，挂到守卫**首位**（先于 InjectionDetector）。
+        # M2 入口意图分类器：显式传入时挂到首位（可与 defense 自带的「仅工具通道」分类器并存）。
         # 命中即 sanitize_user_input 返回拦截标记，runtime 短路口整体拦截并置 trace.intent_flag。
         guardrails.insert(0, intent_classifier)
     if sandbox or defense:

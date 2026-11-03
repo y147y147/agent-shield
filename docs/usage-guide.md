@@ -141,8 +141,10 @@ agent-shield attack -m indirect_injection --sandbox   # run_command 受限执行
 2. **资源限制**：CPU 1s / 文件 1MB / 内存 256MB / 超时 10s / 固定 cwd=/tmp。
 
 注意：黑名单是"近似拦截"（如 `python3 -c` 内嵌代码可绕过模式匹配），
-强隔离需 Docker / nsjail（`docker-compose.yml` 已预留）。Web 工作台"沙箱测试"页
-还会先过语义策略引擎，因此即使关闭沙箱开关，危险命令也会被策略层拦截。
+容器后端：设置 `AGENT_SHIELD_SANDBOX=docker`（或 `auto`）启用 `DockerSandboxExecutor`
+（无网络 / 只读根 / 非 root）；无 Docker 时 `auto` 回退 local 黑名单沙箱。边界说明见
+`docs/sandbox-escape-matrix.md`。Web 工作台"沙箱测试"页还会先过语义策略引擎，
+因此即使关闭沙箱开关，危险命令也会被策略层拦截。
 
 ## 7. MITM 审计代理
 

@@ -7,6 +7,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agent_shield.defenses.docker_sandbox import build_sandbox_executor
 from agent_shield.defenses.sandbox import SandboxExecutor
 from agent_shield.runtime.llm import tool_schema
 
@@ -116,9 +117,10 @@ class RunCommandTool(Tool):
     （ASI-05 意外代码执行 / ASI-08 级联故障的对策）。
     """
 
-    def __init__(self, sandbox: bool = False) -> None:
+    def __init__(self, sandbox: bool = False, sandbox_backend: str | None = None) -> None:
         self.sandbox = sandbox
-        self.executor = SandboxExecutor()
+        # auto：有 Docker 则容器隔离，否则轻量黑名单沙箱（见 defenses/docker_sandbox.py）
+        self.executor: SandboxExecutor = build_sandbox_executor(sandbox_backend)
         super().__init__(
             name="run_command",
             description="在本地执行一条 shell 命令并返回输出。",
@@ -230,11 +232,19 @@ class ReceiveMessageTool(Tool):
         return "（暂无新消息）"
 
 
-def build_default_tools() -> ToolRegistry:
-    """Demo 靶场默认工具集。"""
+def build_default_tools(
+    *,
+    sandbox: bool = False,
+    sandbox_backend: str | None = None,
+) -> ToolRegistry:
+    """Demo 靶场默认工具集。
+
+    ``sandbox_backend``：``auto`` / ``local`` / ``docker``（也可用环境变量
+    ``AGENT_SHIELD_SANDBOX``）；默认 auto——有 Docker 则容器隔离。
+    """
     registry = ToolRegistry()
     registry.add(WebSearchTool())
-    registry.add(RunCommandTool())
+    registry.add(RunCommandTool(sandbox=sandbox, sandbox_backend=sandbox_backend))
     registry.add(ReadFileTool())
     registry.add(WriteFileTool())
     registry.add(SendEmailTool())

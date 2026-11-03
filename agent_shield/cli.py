@@ -18,6 +18,8 @@
     agent-shield audit-benchmark --quick           # 自主审计指挥官质量回归（离线）
     agent-shield audit-schedule --cron "0 2 * * *" --once  # 定时审计（示例）
     agent-shield http-agent --port 8000              # 暴露 HTTP 黑盒靶场
+    agent-shield attack-http --serve -m tool_impersonation  # 一键起靶场并黑盒攻击
+    agent-shield self-improve-weak --llm openai-compat --model deepseek-chat  # 抬弱模块 ASR
     agent-shield mcp --url http://127.0.0.1:8080/mcp   # 审计 MCP server 工具
     agent-shield modules                       # 列出可用攻击模块
 """
@@ -104,6 +106,10 @@ def main(
 ) -> None:
     """AgentShield CLI：日志默认静默，可用 --log-level/--log-format 打开结构化日志。"""
     _configure_stdio()
+    # 本机 .env（已被 .gitignore）→ 环境变量；切勿把 API Key 贴进聊天
+    from agent_shield.envfile import load_dotenv
+
+    load_dotenv()
     configure_logging(level=log_level, json_output=log_format.lower() == "json")
 
 
@@ -685,7 +691,7 @@ def _parse_targets(targets: str, base_url: str | None = None, api_key: str | Non
     """解析 campaign 的目标集：逗号分隔的 ``label`` 或 ``label=model``。
 
     - ``label`` / ``label=``：离线 mock 靶场（同一 label）；
-    - 特殊标签 ``langchain``：Phase 4 真实 LangChain AgentExecutor 靶场；
+    - 特殊标签 ``langchain``：真实 LangChain create_agent（LangGraph）靶场；
       ``langchain`` 默认 mock 模型，``langchain=deepseek-chat`` 用真实模型跑 LangChain；
     - 其他 ``label=model``（model ≠ mock）视为 openai-compat 真实模型靶场。
     """
@@ -930,16 +936,21 @@ def self_improve_cmd(
     if provider:
         spec = resolve_spec(provider, llm=llm, model=model, base_url=base_url, api_key=api_key)
         llm, model, base_url, api_key = spec.llm, spec.model, spec.base_url, spec.api_key
-    if action_hint == "auto":
-        action_hint = "say" if "human_trust" in module else "run_command"
 
     from agent_shield.defenses import IntentClassifier
     from agent_shield.self_improve.loop import (
         LLMRewriter,
         MockPayloadRewriter,
         SelfImproveConfig,
+        rewrite_profile_for,
         run_self_improve,
     )
+
+    profile = rewrite_profile_for(module)
+    if action_hint == "auto":
+        action_hint = profile.action_hint
+    if not action_description:
+        action_description = profile.action_description
 
     classifier = IntentClassifier() if intent_classifier else None
     target = build_local_target(
@@ -958,10 +969,15 @@ def self_improve_cmd(
         rewriter = LLMRewriter(
             model=model, api_key=api_key, base_url=base_url,
             action_description=action_description, cost_budget=budget_gate,
+            marker=profile.marker, style=profile.style,
         )
     else:
-        rewriter = MockPayloadRewriter()
-    console.print(f"[dim]目标: {target.name} — 重写器: {type(rewriter).__name__} — 动作提示: {action_hint}[/]")
+        rewriter = MockPayloadRewriter(marker=profile.marker or "touch /tmp/agent-shield-selfimprove-pwned",
+                                       style=profile.style)
+    console.print(
+        f"[dim]目标: {target.name} — 重写器: {type(rewriter).__name__} — "
+        f"动作={action_hint} style={profile.style} marker={profile.marker or '—'}[/]"
+    )
 
     cfg = SelfImproveConfig(
         module=module, target=target, rewriter=rewriter,
@@ -1486,37 +1502,51 @@ def community_benchmark_cmd(
     model: str | None = typer.Option(None, "--model", help="openai-compat 时的真实模型名，如 deepseek-chat"),
     base_url: str | None = typer.Option(None, "--base-url", help="openai-compat 的 API Base（如 https://api.deepseek.com/v1）"),
     api_key: str | None = typer.Option(None, "--api-key", help="API Key（默认读 OPENAI_API_KEY）"),
+    repeats: int = typer.Option(1, "--repeats", "-n", min=1, help="每样本每侧重复次数（真实模型建议 ≥3，取分布+Wilson CI）"),
+    seed: int | None = typer.Option(None, "--seed", help="随机种子（写入报告，便于复现）"),
     max_asr: float = typer.Option(0.3, "--max-asr", min=0.0, max=1.0, help="加固后 ASR 门禁上限，超过以退出码 1 结束"),
     json_out: Path | None = typer.Option(None, "--json", help="输出 JSON 报告"),
     md_out: Path | None = typer.Option(None, "--markdown", help="输出 Markdown 报告"),
 ) -> None:
-    """社区基准横向对比：AgentDojo 官方攻击模板（裸机 vs 加固）。"""
+    """社区基准横向对比：AgentDojo 官方攻击模板（裸机 vs 加固；可 N 次取分布）。"""
     from agent_shield.benchmark.community import run_community
 
     report = asyncio.run(
-        run_community(llm=llm, dataset_path=dataset, model=model, base_url=base_url, api_key=api_key)
+        run_community(
+            llm=llm,
+            dataset_path=dataset,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            repeats=repeats,
+            seed=seed,
+        )
     )
 
-    table = Table(
-        title=f"社区风格注入样本（{len(report.rows)} 条 · llm={llm}）——裸机 vs 加固 ASR",
-        show_lines=True,
+    title = (
+        f"社区风格注入样本（{len(report.rows)} 条 · llm={llm} · repeats={report.repeats}"
+        f"{'' if seed is None else f' · seed={seed}'}）——裸机 vs 加固 ASR"
     )
+    table = Table(title=title, show_lines=True)
     table.add_column("样本")
     table.add_column("家族", justify="right")
     table.add_column("类别", style="dim")
-    table.add_column("裸机生效", justify="center")
-    table.add_column("加固生效", justify="center")
+    table.add_column("裸机", justify="center")
+    table.add_column("加固", justify="center")
     for r in report.rows:
-        table.add_row(
-            r.id,
-            r.family,
-            r.category,
-            "✓" if r.bare_action else "—",
-            "✗" if r.defended_action else "—",
-        )
+        if report.repeats > 1:
+            bare_cell = f"{r.bare_hits}/{r.bare_trials} ({r.bare_rate:.0%})"
+            def_cell = f"{r.defended_hits}/{r.defended_trials} ({r.defended_rate:.0%})"
+        else:
+            bare_cell = "✓" if r.bare_action else "—"
+            def_cell = "✗" if r.defended_action else "—"
+        table.add_row(r.id, r.family, r.category, bare_cell, def_cell)
     table.add_row(
-        "ASR", "", "生效样本占比",
-        f"{report.asr_bare:.0%}", f"{report.asr_defended:.0%}",
+        "ASR",
+        "",
+        f"{int(report.confidence * 100)}% Wilson CI",
+        f"{report.asr_bare:.0%} [{report.asr_bare_ci_low:.0%}–{report.asr_bare_ci_high:.0%}]",
+        f"{report.asr_defended:.0%} [{report.asr_defended_ci_low:.0%}–{report.asr_defended_ci_high:.0%}]",
     )
     console.print(table)
     console.print(
@@ -1525,41 +1555,28 @@ def community_benchmark_cmd(
     )
 
     if json_out:
-        json_out.write_text(
-            json.dumps(
-                {
-                    "llm": llm,
-                    "n": len(report.rows),
-                    "asr_bare": report.asr_bare,
-                    "asr_defended": report.asr_defended,
-                    "reduction": report.reduction,
-                    "rows": [
-                        {
-                            "id": r.id, "family": r.family, "category": r.category,
-                            "bare_action": r.bare_action, "defended_action": r.defended_action,
-                        }
-                        for r in report.rows
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        payload = report.to_dict()
+        payload["llm"] = llm
+        json_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         console.print(f"[dim]JSON 报告已写入: {json_out}[/]")
     if md_out:
         lines = [
-            f"# Community Benchmark（外部风格注入样本，llm={llm}）\n",
-            "| 样本 | 家族 | 类别 | 裸机生效 | 加固生效 |",
+            f"# Community Benchmark（外部风格注入样本，llm={llm}, repeats={report.repeats}）\n",
+            "| 样本 | 家族 | 类别 | 裸机 | 加固 |",
             "| --- | --- | --- | :-: | :-: |",
         ]
         for r in report.rows:
-            lines.append(
-                f"| {r.id} | {r.family} | {r.category} | "
-                f"{'✓' if r.bare_action else '—'} | {'✗' if r.defended_action else '—'} |"
-            )
+            if report.repeats > 1:
+                bare_cell = f"{r.bare_hits}/{r.bare_trials}"
+                def_cell = f"{r.defended_hits}/{r.defended_trials}"
+            else:
+                bare_cell = "✓" if r.bare_action else "—"
+                def_cell = "✗" if r.defended_action else "—"
+            lines.append(f"| {r.id} | {r.family} | {r.category} | {bare_cell} | {def_cell} |")
         lines.append(
-            f"| **ASR** | | **生效占比** | **{report.asr_bare:.0%}** | **{report.asr_defended:.0%}** |"
+            f"| **ASR** | | **点估计 [CI]** | "
+            f"**{report.asr_bare:.0%}** [{report.asr_bare_ci_low:.0%}–{report.asr_bare_ci_high:.0%}] | "
+            f"**{report.asr_defended:.0%}** [{report.asr_defended_ci_low:.0%}–{report.asr_defended_ci_high:.0%}] |"
         )
         md_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         console.print(f"[dim]Markdown 报告已写入: {md_out}[/]")
@@ -1816,6 +1833,180 @@ def dashboard(
     uvicorn.run(proxy_app, host="127.0.0.1", port=port)
 
 
+@app.command("self-improve-weak")
+def self_improve_weak_cmd(
+    modules: str = typer.Option(
+        "",
+        "--modules",
+        help="逗号分隔模块名；默认 tool_impersonation,human_trust_exploitation,rogue_agent",
+    ),
+    llm: str = typer.Option("mock", "--llm", help="目标模型: mock | openai-compat"),
+    model: str | None = typer.Option(None, "--model", help="openai-compat 时必填"),
+    api_key: str | None = typer.Option(None, "--api-key", help="API Key（默认读 OPENAI_API_KEY / .env）"),
+    base_url: str | None = typer.Option(None, "--base-url", help="API Base URL"),
+    budget: int = typer.Option(12, "--budget", min=1),
+    rounds: int = typer.Option(3, "--rounds", min=1),
+    variants: int = typer.Option(3, "--variants", "-n", min=1),
+    defense: bool = typer.Option(False, "--defense/--no-defense"),
+    seed: int | None = typer.Option(42, "--seed"),
+    require_gain: bool = typer.Option(
+        False,
+        "--require-gain/--no-require-gain",
+        help="任一弱模块 improved_asr 未超过 baseline 则以退出码 1 结束（真实模型门禁）",
+    ),
+) -> None:
+    """批量自改进：专打历史上 ASR 偏低的弱模块，自动套模块画像（marker/style）。"""
+    from agent_shield.self_improve.loop import (
+        LLMRewriter,
+        MockPayloadRewriter,
+        SelfImproveConfig,
+        WEAK_MODULES,
+        rewrite_profile_for,
+        run_self_improve,
+    )
+
+    names = [m.strip() for m in modules.split(",") if m.strip()] or list(WEAK_MODULES)
+    if llm == "openai-compat" and not model:
+        raise typer.BadParameter("openai-compat 须指定 --model")
+
+    table = Table(title="弱模块自改进批量", show_lines=True)
+    table.add_column("模块")
+    table.add_column("基线 ASR", justify="center")
+    table.add_column("改进 ASR", justify="center")
+    table.add_column("增益", justify="center")
+    table.add_column("style", style="dim")
+
+    any_gain = False
+    failed_gain: list[str] = []
+    for name in names:
+        profile = rewrite_profile_for(name)
+        target = build_local_target(llm=llm, defense=defense, model=model, api_key=api_key, base_url=base_url)
+        if llm == "openai-compat":
+            rewriter: Any = LLMRewriter(
+                model=model or "",
+                api_key=api_key,
+                base_url=base_url,
+                action_description=profile.action_description,
+                marker=profile.marker,
+                style=profile.style,
+            )
+        else:
+            rewriter = MockPayloadRewriter(
+                marker=profile.marker or "touch /tmp/agent-shield-selfimprove-pwned",
+                style=profile.style,
+            )
+        cfg = SelfImproveConfig(
+            module=name,
+            target=target,
+            rewriter=rewriter,
+            budget=budget,
+            rounds=rounds,
+            num_variants=variants,
+            seed=seed,
+            action_hint=profile.action_hint,
+        )
+        report = asyncio.run(run_self_improve(cfg))
+        gain = report.gain
+        if gain > 0:
+            any_gain = True
+        else:
+            failed_gain.append(name)
+        table.add_row(
+            name,
+            f"{report.baseline_asr:.0%}",
+            f"{report.improved_asr:.0%}",
+            f"{gain:+.0%}",
+            profile.style,
+        )
+    console.print(table)
+    if any_gain:
+        console.print("[green]✓ 至少有一个弱模块自改进增益 > 0。[/]")
+    else:
+        console.print("[yellow]! 本轮无增益（mock 上基线已打穿时属正常；真实模型请加大 --rounds/--budget）。[/]")
+    if require_gain and failed_gain:
+        console.print(f"[bold red]未提效模块: {', '.join(failed_gain)}[/]")
+        raise typer.Exit(1)
+
+
+@app.command("attack-http")
+def attack_http_cmd(
+    url: str | None = typer.Option(
+        None, "--url", help="已部署智能体根地址，如 http://127.0.0.1:8000（不要带 /run）"
+    ),
+    serve: bool = typer.Option(
+        False, "--serve/--no-serve", help="一键在本地拉起 Demo HTTP 靶场再攻击（无需先手开 http-agent）"
+    ),
+    port: int = typer.Option(8765, "--port", "-p", help="--serve 时的本地端口"),
+    host: str = typer.Option("127.0.0.1", "--host", help="--serve 时的监听地址"),
+    module: str = typer.Option("tool_impersonation", "--module", "-m", help="攻击模块"),
+    variants: int = typer.Option(3, "--variants", "-n", min=1),
+    defense: bool = typer.Option(False, "--defense/--no-defense", help="--serve 时服务端是否挂防线"),
+    llm: str = typer.Option("mock", "--llm", help="--serve 时靶场模型: mock | openai-compat"),
+    model: str | None = typer.Option(None, "--model"),
+    api_key: str | None = typer.Option(None, "--api-key"),
+    base_url: str | None = typer.Option(None, "--base-url"),
+    timeout: float = typer.Option(60.0, "--timeout", min=1.0),
+    seed: int | None = typer.Option(None, "--seed"),
+    fail_on_finding: bool = typer.Option(
+        True, "--fail-on-finding/--no-fail-on-finding", help="发现漏洞时退出码 1"
+    ),
+) -> None:
+    """HTTP 黑盒一键攻击：指向已有 Agent URL，或 ``--serve`` 本地起靶场后立刻打。
+
+    契约：``POST {url}/run`` + ``{"task": "..."}`` → ``{"trace": AgentTrace}``。
+    """
+    import threading
+    import time
+
+    import httpx
+    import uvicorn
+
+    from agent_shield.serve import build_http_agent_app
+    from agent_shield.targets import HttpAgentTarget
+
+    if not serve and not url:
+        raise typer.BadParameter("请提供 --url，或加 --serve 一键拉起本地靶场")
+
+    server: uvicorn.Server | None = None
+    if serve:
+        url = f"http://{host}:{port}"
+        server_app = build_http_agent_app(
+            llm=llm, defense=defense, model=model, api_key=api_key, base_url=base_url
+        )
+        config = uvicorn.Config(server_app, host=host, port=port, log_level="warning")
+        server = uvicorn.Server(config)
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        # 等 healthz
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                r = httpx.get(f"{url}/healthz", timeout=1.0)
+                if r.status_code == 200:
+                    break
+            except Exception:  # noqa: BLE001
+                time.sleep(0.2)
+        else:
+            raise RuntimeError(f"本地 HTTP 靶场未能在 15s 内就绪: {url}/healthz")
+        console.print(f"[bold green]已拉起 Demo Agent[/]  {url}/run  (defense={defense}, llm={llm})")
+
+    assert url is not None
+    target = HttpAgentTarget(base_url=url, timeout=timeout, name="http-agent", description=f"HTTP 黑盒 — {url}")
+    attack_module = get_attack_module(module)
+    console.print(f"[dim]黑盒目标: {target.description} — 模块 {module}[/]")
+    result = asyncio.run(
+        attack_module.run(target, AttackConfig(task=DEFAULT_TASK, num_variants=variants, seed=seed))
+    )
+    _render_result(result)
+    apply_verification(result)
+
+    if server is not None:
+        server.should_exit = True
+
+    if result.successes and fail_on_finding:
+        raise typer.Exit(code=1)
+
+
 @app.command("http-agent")
 def http_agent(
     port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
@@ -1827,7 +2018,7 @@ def http_agent(
     api_key: str | None = typer.Option(None, "--api-key"),
     base_url: str | None = typer.Option(None, "--base-url"),
 ) -> None:
-    """把 Demo 靶场以 HTTP 服务暴露（黑盒智能体，供 HttpAgentTarget 测试）。"""
+    """把 Demo 靶场以 HTTP 服务暴露（黑盒智能体，供 HttpAgentTarget / attack-http 测试）。"""
     import uvicorn
 
     from agent_shield.serve import build_http_agent_app

@@ -17,7 +17,23 @@ from __future__ import annotations
 import re
 
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
+from agent_shield.defenses.deobfuscate import normalize_for_detection
+from agent_shield.defenses.injection_detector import INPUT_REDACTED_PREFIX, UNTRUSTED_TOOL_CHANNELS
 from agent_shield.models import ToolCall
+
+# 工具输出通道信号：比入口 INTENT_SIGNALS 更窄，避免网页正文「密码策略」类误伤
+TOOL_CHANNEL_SIGNALS: tuple[str, ...] = (
+    "INSTRUCTION",
+    "ignore previous",
+    "ignore your previous",
+    "system_message",
+    "system prompt",
+    "【系统提示】",
+    "jsjailbreak",
+    "sysprompt",
+    "越狱",
+    "提权",
+)
 
 # 恶意越狱意图信号（关键词族）：命中任一即判"有恶意意图"
 INTENT_BLOCKED_PREFIX = "[意图分类器拦截]"
@@ -85,23 +101,53 @@ class IntentClassifier(GuardRail):
     # 运行时状态：最近一次命中的类别（keyword/boundary），测试可断言
     last_hit_category: str = ""
 
-    def __init__(self, signals: tuple[str, ...] = INTENT_SIGNALS,
-                 boundary_tools: tuple[str, ...] = BOUNDARY_TOOLS, *, flag_field: str = "intent_flag"):
+    def __init__(
+        self,
+        signals: tuple[str, ...] = INTENT_SIGNALS,
+        boundary_tools: tuple[str, ...] = BOUNDARY_TOOLS,
+        *,
+        flag_field: str = "intent_flag",
+        scan_tool_output: bool = True,
+        entry_filter: bool = True,
+        tool_channel_signals: tuple[str, ...] = TOOL_CHANNEL_SIGNALS,
+        untrusted_tools: frozenset[str] | None = None,
+    ):
         self._signals = signals
         self._boundary_tools = boundary_tools
         self._flag_field = flag_field
+        self._scan_tool_output = scan_tool_output
+        self._entry_filter = entry_filter
+        self._tool_channel_signals = tool_channel_signals
+        self._untrusted_tools = untrusted_tools if untrusted_tools is not None else UNTRUSTED_TOOL_CHANNELS
 
     def is_malicious(self, text: str) -> tuple[bool, str]:
         return _classify(text, self._signals, self._boundary_tools)
 
+    def is_malicious_tool_output(self, text: str) -> tuple[bool, str]:
+        """不可信工具输出：窄信号 + 去混淆后再判（补入口盲区）。"""
+        probe = normalize_for_detection(text)
+        return _classify(probe, self._tool_channel_signals, ())
+
     async def sanitize_user_input(self, text: str) -> str:
         """请求进主模型前：命中恶意意图 → 拦截占位（运行时识别该前缀即整体拦截）。"""
+        if not self._entry_filter:
+            return text
         hit, category = self.is_malicious(text)
         if hit:
             self.last_hit_category = category
             return f"{INTENT_BLOCKED_PREFIX}：{category}（请求已拦截）"
         return text
 
+    async def sanitize_tool_output(self, call: ToolCall, output: str) -> str:
+        """工具输出通道：仅扫描不可信工具；命中则整段脱敏（不喂主模型）。"""
+        if not self._scan_tool_output or call.name not in self._untrusted_tools:
+            return output
+        hit, category = self.is_malicious_tool_output(output)
+        if hit:
+            self.last_hit_category = f"tool:{category or 'channel'}"
+            return f"{INPUT_REDACTED_PREFIX}: 意图分类器拦截工具输出/{self.last_hit_category}]"
+        return output
+
     async def check_tool_call(self, call: ToolCall) -> ToolCallDecision:
-        # 工具调用侧不拦截（分类器只做入口过滤）；边界工具放行由 PolicyEngine 判定
-        return ToolCallDecision(allowed=True, reason="intent classifier: entry filter only")
+        # 工具调用前置不拦截；边界工具放行由 PolicyEngine 判定。输出通道见 sanitize_tool_output。
+        return ToolCallDecision(allowed=True, reason="intent classifier: entry+tool-output filter")

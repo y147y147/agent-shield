@@ -7,6 +7,7 @@ import logging
 import time
 
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
+from agent_shield.defenses.injection_detector import is_fully_redacted_input
 from agent_shield.defenses.intent_classifier import INTENT_BLOCKED_PREFIX
 from agent_shield.models import AgentTrace, BlockedCall, ChatMessage, ToolCall, TraceStep
 from agent_shield.observability import GUARDRAIL_LATENCY, TOOL_CALLS, get_logger, log_event
@@ -52,13 +53,12 @@ class AgentRuntime:
             self.event_sink(event)
 
     async def run(self, task: str) -> AgentTrace:
-        # 用户输入先经过防护层清洗（直接注入防御）
+        # 先 reset（调用预算 / 污点等按 run 计状态），再清洗输入——避免 sanitize 置污点后被 reset 清掉
+        for guard in self.guardrails:
+            guard.reset()
         user_content = task
         for guard in self.guardrails:
             user_content = await guard.sanitize_user_input(user_content)
-        # 按运行计数的防护（如调用预算）重置状态
-        for guard in self.guardrails:
-            guard.reset()
 
         trace = AgentTrace(task=task)
         # M2：意图识别分类器命中（请求进主模型前被前置过滤拦截）→ 标记 intent_flag，
@@ -68,6 +68,14 @@ class AgentRuntime:
             trace.final_answer = f"（请求已被意图分类器拦截：{user_content}）"
             trace.duration_ms = 0
             self._emit({"type": "intent_blocked", "text": user_content})
+            return trace
+        # 注入检测整段脱敏后同样短路：真实模型若仍看到占位符，会按系统提示去 dir 工作目录，
+        # 社区基准会把这类 run_command 误计为 ASR（加固反升根因）。
+        if is_fully_redacted_input(user_content):
+            trace.input_blocked = True
+            trace.final_answer = f"（请求已被注入防护整段拦截：{user_content}）"
+            trace.duration_ms = 0
+            self._emit({"type": "input_blocked", "text": user_content})
             return trace
 
         messages: list[ChatMessage] = [ChatMessage.system(self.system_prompt), ChatMessage.user(user_content)]

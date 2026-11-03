@@ -49,8 +49,19 @@ ROGUE_MARKER_CMD = "touch /tmp/agent-shield-rogue-pwned"
 
 
 def _extract_instructions(text: str) -> list[tuple[str, str]]:
-    """提取文本中全部攻击者指令，返回 [(工具名, 参数串), ...]。"""
-    return [(m.group(1).lower(), m.group(2).strip()) for m in _INSTRUCTION_RE.finditer(text)]
+    """提取文本中全部攻击者指令，返回 [(工具名, 参数串), ...]。
+
+    优先显式 ``INSTRUCTION:``；若无，再抽语义伪装「请执行/请运行 …」（间接注入对抗集）。
+    """
+    found = [(m.group(1).lower(), m.group(2).strip()) for m in _INSTRUCTION_RE.finditer(text)]
+    if found:
+        return found
+    try:
+        from agent_shield.defenses.semantic_injection import extract_semantic_run_commands
+
+        return [("run_command", cmd) for cmd in extract_semantic_run_commands(text)]
+    except Exception:  # noqa: BLE001 —— 防御模块异常时不影响 Mock 主路径
+        return []
 
 
 def _extract_instruction(text: str) -> tuple[str, str] | None:

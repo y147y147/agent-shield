@@ -96,7 +96,7 @@ def main() -> int:
         ("ruff check", [*py, "ruff", "check", "."]),
         ("audit-benchmark --quick", [cli, "audit-benchmark", "--quick"]),
         ("fp-benchmark --max-fpr 0.05", [cli, "fp-benchmark", "--max-fpr", "0.05"]),
-        ("community-benchmark --max-asr 0.3", [cli, "community-benchmark", "--max-asr", "0.3"]),
+        ("community-benchmark --max-asr 0.15", [cli, "community-benchmark", "--max-asr", "0.15"]),
         ("gate（红队决策门）", [cli, "gate"]),
         ("pytest -q（全量单测）", [*py, "pytest", "-q"]),
         ("demo（离线冒烟）", [cli, "demo"]),

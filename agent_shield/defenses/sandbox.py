@@ -10,8 +10,8 @@
 
 当前实现为"轻量沙箱"（黑名单 + subprocess + resource 限制 + 超时）。黑名单能挡住
 常见破坏命令，但**不是强隔离**（如 python3 -c 内嵌代码仍可绕过模式匹配）——
-生产环境请升级为 Docker / nsjail / gVisor 等强隔离（见 docker-compose.yml），
-SandboxExecutor 保持同一接口。
+容器后端见 ``docker_sandbox.DockerSandboxExecutor``（``AGENT_SHIELD_SANDBOX=docker|auto``）；
+同一 ``run`` / ``deny_match`` 接口，可再换 nsjail / gVisor。
 """
 
 from __future__ import annotations

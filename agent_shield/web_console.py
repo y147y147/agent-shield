@@ -37,6 +37,7 @@ from agent_shield.self_improve.loop import (
     LLMRewriter,
     MockPayloadRewriter,
     SelfImproveConfig,
+    rewrite_profile_for,
     run_self_improve,
 )
 from agent_shield.store import FindingStatus, Store, default_attack_db_path
@@ -168,9 +169,11 @@ async def _dispatch_self_improve(store: Store, p: dict[str, Any]) -> dict[str, A
     _require_openai_model(p, llm)
     defense = bool(p.get("defense", False))
     intent_classifier = bool(p.get("intent_classifier", False))
+    profile = rewrite_profile_for(module)
     action_hint = p.get("action_hint", "auto")
     if action_hint == "auto":
-        action_hint = "say" if "human_trust" in module else "run_command"
+        action_hint = profile.action_hint
+    action_description = p.get("action_description") or profile.action_description
     classifier = IntentClassifier() if intent_classifier else None
     target = build_local_target(
         llm=llm, defense=defense, model=p.get("model"),
@@ -181,10 +184,14 @@ async def _dispatch_self_improve(store: Store, p: dict[str, Any]) -> dict[str, A
     if llm == "openai-compat":
         rewriter = LLMRewriter(
             model=p.get("model"), api_key=p.get("api_key"), base_url=p.get("base_url"),
-            action_description=p.get("action_description", ""), cost_budget=budget_gate,
+            action_description=action_description, cost_budget=budget_gate,
+            marker=profile.marker, style=profile.style,
         )
     else:
-        rewriter = MockPayloadRewriter()
+        rewriter = MockPayloadRewriter(
+            marker=profile.marker or "touch /tmp/agent-shield-selfimprove-pwned",
+            style=profile.style,
+        )
     cfg = SelfImproveConfig(
         module=module, target=target, rewriter=rewriter,
         budget=int(p.get("budget", 12)), rounds=int(p.get("rounds", 3)),

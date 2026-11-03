@@ -1,15 +1,15 @@
 # 沙箱逃逸矩阵（Sandbox Escape Matrix）
 
-> 适用版本：v0.4 / v1.0-M0
-> 被测对象：`agent_shield/defenses/sandbox.py` → `SandboxExecutor`
-> 回归套件：`tests/test_sandbox_escape.py`（本文件的每个用例名都对应一条参数化测试）
+> 适用版本：v0.4 / v1.0-M0（含可插拔 Docker 后端）
+> 被测对象：`SandboxExecutor`（local）+ `DockerSandboxExecutor`（`defenses/docker_sandbox.py`）
+> 回归套件：`tests/test_sandbox_escape.py`（用例名与下表对齐）+ `tests/test_docker_sandbox.py`
 
 ## 一句话结论
 
-**v0.4 的沙箱是"危险命令黑名单 + 资源限制 + 超时"的轻量沙箱，不是隔离边界。**
-它能挡住脚本小子的常见破坏命令，但**挡不住任何有意的绕过**。因此本项目的定位是
-"发现问题的雷达 + 可插拔的应用层防护"，**不要把 `SandboxExecutor` 当成生产环境的
-安全边界**；强隔离属于 v1.0 计划（见文末）。
+**默认的 local 沙箱仍是"危险命令黑名单 + 资源限制 + 超时"，不是隔离边界。**
+它能挡住脚本小子的常见破坏命令，但**挡不住任何有意的绕过**。生产请开
+容器后端：`AGENT_SHIELD_SANDBOX=docker`（或 `auto`：有 Docker 则容器，否则回退 local）。
+`RunCommandTool` / `build_sandbox_executor()` 共用同一接口。
 
 > 关键设计：命中黑名单 → **拒绝执行**（`denied=True`，不产生副作用）；
 > 未命中 → 交给自己做判定的人（`deny_match()` 是纯判定 API，可安全用于"只判定不执行"的场景）。
@@ -76,31 +76,49 @@ Windows 上的差异由 `tests/test_sandbox_escape.py::test_windows_sandbox_has_
 
 ---
 
-## 4. v1.0 强隔离计划（对应 `docs/optimization-plan-v1.0.md` A1–A4）
+## 4. Docker 后端现状（A1 部分落地）
+
+环境变量：`AGENT_SHIELD_SANDBOX=auto|local|docker`，镜像 `AGENT_SHIELD_SANDBOX_IMAGE`（默认 `alpine:3.20`）。
+
+容器参数：`--network=none`、`--read-only`、`tmpfs /tmp`、`--user 65534`、`--memory` / `--cpus` / `--pids-limit`、`no-new-privileges`。
+
+| BYPASS 用例 | local 黑名单 | Docker 后端（隔离层） |
+| --- | --- | --- |
+| `inline-interpreter` | ❌ 仍可进容器执行 python（若镜像有） | ⚠️ 隔离在容器内，**不**升为黑名单 BLOCKED；策略层仍拒 |
+| `base64-pipe` / `variable-indirection` / `quote-splitting` | ❌ | ⚠️ 同上；策略拦元字符 |
+| `shred-file` / `env-dump` | ❌ | ⚠️ 容器内执行；策略白名单拒 |
+| `socket-egress` | ❌ 无网络 NS | ✅ `--network=none`（见 `test_docker_sandbox_network_none_blocks_egress`） |
+| `write-outside-cwd` | ❌ 无 FS 隔离 | ✅ 只读根 + 仅挂载工作目录（见 readonly 测试） |
+
+说明：第 2 节 BYPASS **仍对 local 黑名单成立**（逃逸套件不改断言口径）；Docker 用**隔离**兜住网络/写盘，
+不等于把黑名单扩成「解释器一律拒绝」。完整 A1 验收（8 条全部升 BLOCKED）仍待 gVisor/策略默认收紧。
+
+## 5. v1.0 强隔离计划（对应 `docs/optimization-plan-v1.0.md` A1–A4）
 
 | 目标 | 手段 | 验收标准 |
 | --- | --- | --- |
-| A1 容器化强沙箱 | Docker/Podman：只读根文件系统、临时卷、非 root、CPU/内存/PID 限制 | 本文档第 2 节 8 条 BYPASS 用例 **全部被阻断**，且 `inline-interpreter` / `base64-pipe` 无法逃逸 |
-| A2 内核级隔离 | gVisor / nsjail / Firecracker 可选后端（同一 `Sandbox` 接口） | 同上，启动 < 2s |
+| A1 容器化强沙箱 | Docker/Podman：只读根、临时卷、非 root、资源限制（**已提供可插拔实现**） | 网络/写盘隔离可测；第 2 节 8 条全部升 BLOCKED 仍为后续 |
+| A2 内核级隔离 | gVisor / nsjail / Firecracker 可选后端（同一接口） | 同上，启动 < 2s |
 | A3 跨平台 | Windows Job Objects / AppContainer；macOS `sandbox-exec` | 三平台各自跑通逃逸套件 |
-| A4 网络与出网策略 | 默认无网络 + 出网白名单 + DNS 日志 | `socket-egress` 从 BYPASS 变为 BLOCKED |
+| A4 网络与出网策略 | 默认无网络 + 出网白名单 + DNS 日志 | `socket-egress`：Docker 已隔离；黑名单口径另议 |
 | A5 资源与成本预算 | 单次运行工具调用数 / token / 墙钟 / 美元预算 | 超限自动终止并标记 `budget_exhausted` |
 
-**验收方式**：把本文件第 2 节的用例从 "BYPASS（断言不命中）" 迁移到 "BLOCKED（断言被拒绝）"，
-即强隔离达标；迁移由 `tests/test_sandbox_escape.py` 的用例清单驱动（改代码必须同步改文档与测试，
-`test_escape_matrix_doc_lists_all_cases` 会强制这一约束）。
+**验收方式**：local 黑名单用例仍由 `tests/test_sandbox_escape.py` + 本文第 1–2 节同步
+（`test_escape_matrix_doc_lists_all_cases`）；Docker 隔离由 `tests/test_docker_sandbox.py`（无 daemon 则 skip）。
 
 ---
 
-## 5. 怎么用这套矩阵
+## 6. 怎么用这套矩阵
 
 ```bash
-pytest -q tests/test_sandbox_escape.py       # 本地回归（离线、跨平台）
+pytest -q tests/test_sandbox_escape.py       # local 黑名单边界（离线）
+pytest -q tests/test_docker_sandbox.py       # 有 Docker 时跑容器隔离；否则 skip
+set AGENT_SHIELD_SANDBOX=docker              # Windows PowerShell: $env:AGENT_SHIELD_SANDBOX="docker"
 agent-shield benchmark                        # 攻防矩阵（含沙箱相关的 ASI-05/08）
 ```
 
 写报告时的正确表述示例：
 
-> 在 v0.4 中，`SandboxExecutor` 拦截了 19 类常见破坏性命令（黑名单），
-> 但仍有 8 类已知绕过（内嵌解释器、编码混淆、变量拼接、同类工具、网络与文件系统无隔离），
-> 其中 7 类在启用 `PolicyEngine` 时可由语义校验兜住；生产环境需替换为容器/微虚拟机隔离。
+> local `SandboxExecutor` 拦截 19 类破坏性命令，另有 8 类已知绕过；其中多数在
+> `PolicyEngine` 下由语义校验兜住。启用 `DockerSandboxExecutor`（`AGENT_SHIELD_SANDBOX=docker|auto`）
+> 后，网络与根文件系统写入在容器边界被隔离；解释器类绕过仍需策略白名单，不宜宣称「黑名单已无逃逸」。

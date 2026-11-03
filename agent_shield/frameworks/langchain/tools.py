@@ -15,10 +15,11 @@ from typing import Any
 
 
 def available() -> bool:
-    """LangChain 是否已安装（可选依赖）。"""
+    """LangChain v1 create_agent 是否可用（可选依赖）。"""
     try:
         import langchain  # noqa: F401
         import langchain_core  # noqa: F401
+        from langchain.agents import create_agent  # noqa: F401
 
         return True
     except Exception:
@@ -26,7 +27,10 @@ def available() -> bool:
 
 
 def langchain_import_error() -> str:
-    return "LangChain 未安装；请 `pip install \"agent-shield[langchain]\"` 后重试"
+    return (
+        "LangChain v1（create_agent）未安装；"
+        '请 `pip install "agent-shield[langchain]"` 后重试'
+    )
 
 
 def _ensure_langchain() -> None:
@@ -45,7 +49,7 @@ def build_langchain_target(
     system_prompt: str | None = None,
     max_steps: int = 12,
 ) -> Any:
-    """构建"跑在真实 LangChain AgentExecutor 上"的靶场目标（Phase 4）。
+    """构建"跑在真实 LangChain create_agent（LangGraph）上"的靶场目标。
 
     签名对齐 ``agent_shield.targets.local.build_local_target``，便于攻击模块 / campaign
     无差别调用（``llm`` 支持 mock / openai-compat）。

@@ -88,6 +88,8 @@ class AgentTrace(BaseModel):
     llm_calls: int = 0
     # M2：意图识别分类器命中标记（请求进主模型前被前置过滤拦截的来源）。
     intent_flag: bool = False
+    # 用户输入被注入检测整段脱敏后短路（未喂主模型）；防真实模型对占位符仍去调工具抬高 ASR。
+    input_blocked: bool = False
 
     def all_tool_calls(self) -> list[ToolCall]:
         return [tc for step in self.steps for tc in step.tool_calls]

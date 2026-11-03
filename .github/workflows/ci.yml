@@ -46,7 +46,7 @@ jobs:
         run: agent-shield fp-benchmark --max-fpr 0.05
 
       - name: Community-benchmark (AgentDojo attack templates gate)
-        run: agent-shield community-benchmark --max-asr 0.3
+        run: agent-shield community-benchmark --max-asr 0.15
 
       - name: Red-team gate (Phase1 regression + Phase2 decision gate + FPR; non-zero exit on fail)
         run: agent-shield gate

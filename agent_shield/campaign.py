@@ -164,7 +164,7 @@ async def _run_cell(
     """
     tools = cfg.toolbelt_factory() if cfg.toolbelt_factory else None
     if spec.llm == "langchain":
-        # Phase 4：真实 LangChain AgentExecutor 靶场（mock 或 openai-compat）
+        # 真实 LangChain create_agent（LangGraph）靶场（mock 或 openai-compat）
         from agent_shield.frameworks.langchain.tools import build_langchain_target
 
         target = build_langchain_target(

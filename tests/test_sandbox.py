@@ -51,14 +51,15 @@ def test_sandbox_executor_captures_stdout():
 
 
 def test_run_command_tool_default_is_unsandboxed():
-    tool = RunCommandTool()
+    tool = RunCommandTool(sandbox_backend="local")
     assert tool.sandbox is False
     out = tool._run({"command": "echo hi"})
     assert out.startswith("exit=0")
 
 
 def test_run_command_tool_sandbox_mode_marks_output():
-    tool = RunCommandTool(sandbox=True)
+    # 单元测试锁定 local，避免本机 Docker 半开导致 echo 进容器失败
+    tool = RunCommandTool(sandbox=True, sandbox_backend="local")
     assert tool.sandbox is True
     out = tool._run({"command": "echo hi"})
     assert out.startswith("sandboxed=0")
