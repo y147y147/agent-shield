@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from agent_shield.attacks.base import AttackModule
 from agent_shield.attacks.tool_impersonation import IMP_MARKER_CMD
-from agent_shield.models import AttackCase, AttackResult, AttackVerdict
+from agent_shield.models import AttackResult, AttackVerdict
 from agent_shield.self_improve.loop import (
     MockPayloadRewriter,
     SelfImproveConfig,

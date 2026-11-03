@@ -4,14 +4,6 @@ from agent_shield.defenses.adaptive_defense import AdaptivePolicySupervisor
 from agent_shield.defenses.autonomy import AutonomyGuard
 from agent_shield.defenses.base import GuardRail, ToolCallDecision
 from agent_shield.defenses.call_budget import CallBudgetGuard
-from agent_shield.defenses.final_answer_guard import FinalAnswerGuard
-from agent_shield.defenses.injection_detector import (
-    INPUT_REDACTED_PREFIX,
-    UNTRUSTED_TOOL_CHANNELS,
-    Detection,
-    InjectionDetector,
-    is_fully_redacted_input,
-)
 from agent_shield.defenses.deobfuscate import normalize_for_detection
 from agent_shield.defenses.docker_sandbox import (
     DEFAULT_SANDBOX_IMAGE,
@@ -19,6 +11,14 @@ from agent_shield.defenses.docker_sandbox import (
     build_sandbox_executor,
     docker_available,
     resolve_sandbox_backend,
+)
+from agent_shield.defenses.final_answer_guard import FinalAnswerGuard
+from agent_shield.defenses.injection_detector import (
+    INPUT_REDACTED_PREFIX,
+    UNTRUSTED_TOOL_CHANNELS,
+    Detection,
+    InjectionDetector,
+    is_fully_redacted_input,
 )
 from agent_shield.defenses.intent_classifier import (
     BOUNDARY_TOOLS,

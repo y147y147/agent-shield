@@ -91,12 +91,25 @@ class InjectionDetector(GuardRail):
 
     name = "injection_detector"
 
-    def __init__(self, sanitize: bool = True, memory=None, signals=None):
+    def __init__(
+        self,
+        sanitize: bool = True,
+        memory=None,
+        signals=None,
+        *,
+        scan_untrusted_channel: bool | None = None,
+    ):
         self.sanitize = sanitize
         self.memory = memory  # 可选 AttackMemory：命中历史攻击指纹的载荷走快路径拦截
         # 可注入的信号集（WS-E 弱防护用它"去掉 INSTRUCTION: 信号"来模拟规则放宽/懒防御）
         raw = list(signals) if signals is not None else list(SIGNALS)
         self._compiled = [(re.compile(pattern, re.IGNORECASE), desc, sev) for pattern, desc, sev in raw]
+        # 不可信工具通道额外扫描默认仅在全量 SIGNALS 开启；弱信号集若再拦 INSTRUCTION
+        # 会把 redteam/WS-E 的「弱 ASR>0」口径打穿成 0。
+        if scan_untrusted_channel is None:
+            self.scan_untrusted_channel = signals is None
+        else:
+            self.scan_untrusted_channel = scan_untrusted_channel
 
     def memory_hit(self, text: str) -> str | None:
         """快路径：text 中是否命中攻击指纹记忆库中的已知载荷（返回该载荷）。"""
@@ -121,12 +134,12 @@ class InjectionDetector(GuardRail):
                         snippet=normalized.strip()[:120],
                     )
                 )
-                INJECTION_FINDINGS.inc(signal="编码混淆后注入信号")
             elif extra:
                 for f in extra:
                     if f.signal not in {x.signal for x in findings}:
                         findings.append(f)
-                        INJECTION_FINDINGS.inc(signal=f.signal)
+        for f in findings:
+            INJECTION_FINDINGS.inc(signal=f.signal)
         return findings
 
     def _detect_raw(self, text: str) -> list[Detection]:
@@ -221,8 +234,8 @@ class InjectionDetector(GuardRail):
 
     async def sanitize_tool_output(self, call: ToolCall, output: str) -> str:
         cleaned = self.sanitize_text(output)
-        # 不可信通道额外意图扫描（IntentClassifier 入口盲区的补位）
-        if call.name in UNTRUSTED_TOOL_CHANNELS:
+        # 不可信通道额外意图扫描（IntentClassifier 入口盲区的补位；弱防护默认关闭）
+        if self.scan_untrusted_channel and call.name in UNTRUSTED_TOOL_CHANNELS:
             probe = normalize_for_detection(output)
             if _TOOL_CHANNEL_INTENT_RE.search(probe) or looks_like_semantic_injection(probe):
                 INJECTION_FINDINGS.inc(signal="不可信工具通道意图")

@@ -320,12 +320,18 @@ def build_guardrails(defense: bool, registry: Any, judge_llm: Any = None, attack
     )
 
     if not defense:
-        # 弱防护：注入检测器去掉 INSTRUCTION: 信号 = 规则放宽/懒防御（与 redteam.weak_signals 语义一致）。
-        # 默认即用弱信号集；只有在显式传 signals 时才替换（供测试精细控制）。
-        from agent_shield.redteam import weak_signals
-
-        detector = InjectionDetector(sanitize=True, memory=attack_memory, signals=signals if signals is not None else weak_signals())
-        return [detector]
+        # 与 local 靶场一致：defense=False = 真裸机（零守卫）。
+        # 弱防护（去掉 INSTRUCTION 信号）请显式传 signals=weak_signals()，由调用方挂载。
+        if signals is None:
+            return []
+        return [
+            InjectionDetector(
+                sanitize=True,
+                memory=attack_memory,
+                signals=signals,
+                scan_untrusted_channel=False,
+            )
+        ]
 
     from agent_shield.defenses import IntentClassifier
 

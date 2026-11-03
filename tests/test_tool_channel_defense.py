@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-
 from agent_shield.attacks import AttackConfig, get_attack_module
 from agent_shield.defenses.deobfuscate import normalize_for_detection
 from agent_shield.defenses.injection_detector import INPUT_REDACTED_PREFIX, InjectionDetector

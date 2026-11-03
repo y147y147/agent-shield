@@ -31,3 +31,6 @@ htmlcov/
 *.sqlite
 *.sqlite-*
 *.sqlite3
+
+_ci_tools/
+

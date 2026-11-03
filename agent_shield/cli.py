@@ -1857,10 +1857,10 @@ def self_improve_weak_cmd(
 ) -> None:
     """批量自改进：专打历史上 ASR 偏低的弱模块，自动套模块画像（marker/style）。"""
     from agent_shield.self_improve.loop import (
+        WEAK_MODULES,
         LLMRewriter,
         MockPayloadRewriter,
         SelfImproveConfig,
-        WEAK_MODULES,
         rewrite_profile_for,
         run_self_improve,
     )

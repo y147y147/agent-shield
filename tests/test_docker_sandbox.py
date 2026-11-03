@@ -91,7 +91,8 @@ def test_build_auto_falls_back_without_docker(monkeypatch):
 
 @pytest.mark.skipif(os.name == "nt" and not docker_available(), reason="无 Docker 时跳过")
 def test_docker_backend_exports():
-    from agent_shield.defenses import DEFAULT_SANDBOX_IMAGE, build_sandbox_executor as b
+    from agent_shield.defenses import DEFAULT_SANDBOX_IMAGE
+    from agent_shield.defenses import build_sandbox_executor as b
 
     assert DEFAULT_SANDBOX_IMAGE
     assert callable(b)

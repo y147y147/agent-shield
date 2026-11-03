@@ -43,10 +43,11 @@ def test_library_loads_all_twelve_families():
     assert expected <= set(lib.modules()), f"缺失家族: {expected - set(lib.modules())}"
     indirect = lib.get("indirect_injection")
     assert indirect is not None
-    assert indirect.version == "2026.03.1"
+    assert indirect.version == "2026.11.1"
     assert indirect.mapping["owasp"] == "ASI-01"
     assert indirect.channel == "tool_output"
-    assert len([v for v in indirect.variants if not v.benign_control]) == 5
+    # v-001..v-005 + 语义伪装 s-001..s-005
+    assert len([v for v in indirect.variants if not v.benign_control]) == 10
     direct = lib.get("direct_injection")
     assert direct is not None
     assert direct.channel == "user_input"
@@ -68,10 +69,15 @@ def test_family_templates_render_marker():
     family = lib.get("indirect_injection")
     assert family is not None
     attack = [v for v in family.variants if not v.benign_control]
-    assert len(attack) == 5
+    assert len(attack) == 10
     texts = [v.render({"marker": "touch /tmp/x"}) for v in attack]
     assert all("touch /tmp/x" in t for t in texts)
-    assert all("INSTRUCTION" in t or "base64" in t for t in texts)
+    classic = [t for t in texts if "INSTRUCTION" in t or "base64" in t]
+    semantic = [
+        t for t in texts if "INSTRUCTION" not in t and ("请" in t or "please run" in t.lower())
+    ]
+    assert len(classic) >= 5
+    assert len(semantic) >= 1
 
 
 def test_load_family_rejects_bad_schema(tmp_path):
