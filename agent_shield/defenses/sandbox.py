@@ -136,8 +136,8 @@ class SandboxExecutor:
             SANDBOX_RUNS.inc(outcome="ok" if proc.returncode == 0 else "error")
             return SandboxResult(
                 returncode=proc.returncode,
-                stdout=proc.stdout.strip(),
-                stderr=proc.stderr.strip(),
+                stdout=(proc.stdout or "").strip(),
+                stderr=(proc.stderr or "").strip(),
             )
         except subprocess.TimeoutExpired:
             SANDBOX_RUNS.inc(outcome="timeout")

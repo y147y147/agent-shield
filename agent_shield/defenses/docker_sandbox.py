@@ -35,7 +35,11 @@ _DOCKER_AVAILABLE_CACHE: bool | None = None
 
 
 def docker_available(timeout: float = 8.0, *, force_refresh: bool = False) -> bool:
-    """本机是否可用 ``docker`` CLI 且 daemon 可达（结果进程内缓存）。"""
+    """本机是否可用 Docker，且引擎为 Linux（支持 alpine / ``--read-only`` / ``--tmpfs``）。
+
+    GHA ``windows-latest`` 上 daemon 可达但常为 Windows 容器模式：``--read-only``
+    会直接 125 失败；此时应视为不可用，``auto`` 回退 local。
+    """
     global _DOCKER_AVAILABLE_CACHE
     if _DOCKER_AVAILABLE_CACHE is not None and not force_refresh:
         return _DOCKER_AVAILABLE_CACHE
@@ -44,13 +48,14 @@ def docker_available(timeout: float = 8.0, *, force_refresh: bool = False) -> bo
         return False
     try:
         proc = subprocess.run(
-            ["docker", "info"],
+            ["docker", "info", "--format", "{{.OSType}}"],
             capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
         )
-        _DOCKER_AVAILABLE_CACHE = proc.returncode == 0
+        os_type = (proc.stdout or "").strip().lower()
+        _DOCKER_AVAILABLE_CACHE = proc.returncode == 0 and os_type == "linux"
     except (OSError, subprocess.TimeoutExpired):
         _DOCKER_AVAILABLE_CACHE = False
     return _DOCKER_AVAILABLE_CACHE
